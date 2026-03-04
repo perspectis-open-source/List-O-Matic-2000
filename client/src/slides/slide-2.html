@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AI Agent Anatomy &amp; Loop</title>
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Inter:wght@300;400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet"/>
+<style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+            background-color: #0F172A;
+            overflow: hidden;
+            min-height: 100vh;
+            min-width: 100vw;
+            box-sizing: border-box;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .slide-container {
+            width: 1280px;
+            max-width: 100%;
+            height: 720px;
+            max-height: 100vh;
+            background-color: #0F172A;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            color: #F8FAFC;
+            flex-shrink: 0;
+        }
+        .font-heading {
+            font-family: 'Space Grotesk', sans-serif;
+        }
+        
+        /* Background Grid */
+        .bg-grid {
+            background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%2338BDF8' fill-opacity='0.03' fill-rule='evenodd'%3E%3Cpath d='M0 40L40 0H20L0 20M40 40V20L20 40'/%3E%3C/g%3E%3C/svg%3E");
+            opacity: 0.6;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+        }
+
+        /* Section Containers */
+        .top-section {
+            flex: 1.2; /* Slightly larger for the 4 cards */
+            position: relative;
+            border-bottom: 1px dashed rgba(51, 65, 85, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 0 3rem;
+        }
+
+        .bottom-section {
+            flex: 0.8;
+            position: relative;
+            background-color: rgba(15, 23, 42, 0.5);
+            padding: 0 3rem;
+        }
+
+        /* Component Cards */
+        .anatomy-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1.5rem;
+            width: 100%;
+            z-index: 10;
+        }
+
+        .arch-card {
+            background-color: rgba(30, 41, 59, 0.8);
+            border: 1px solid rgba(51, 65, 85, 0.5);
+            backdrop-filter: blur(8px);
+            border-radius: 12px;
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+            position: relative;
+            transition: transform 0.2s;
+        }
+
+        /* Specific Card Styles */
+        .card-brain {
+            border-top: 4px solid #A855F7; /* Purple */
+            background-color: rgba(168, 85, 247, 0.05);
+        }
+
+        .card-hands {
+            border-top: 4px solid #38BDF8; /* Blue */
+            background-color: rgba(56, 189, 248, 0.05);
+        }
+
+        .card-memory {
+            border-top: 4px solid #10B981; /* Emerald */
+            background-color: rgba(16, 185, 129, 0.05);
+        }
+
+        .card-persona {
+            border-top: 4px solid #F43F5E; /* Rose */
+            background-color: rgba(244, 63, 94, 0.05);
+        }
+
+        /* Connectors (SVG) */
+        .connector-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        /* Loop Steps - Bottom Section */
+        .loop-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 100%;
+            position: relative;
+            padding-top: 10px;
+        }
+
+        .loop-step {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            z-index: 2;
+        }
+
+        .step-circle {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background-color: #1E293B;
+            border: 2px solid #334155;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            margin-bottom: 0.75rem;
+            position: relative;
+            z-index: 2;
+        }
+
+        .step-content {
+            text-align: center;
+            background-color: rgba(30, 41, 59, 0.6);
+            padding: 0.75rem;
+            border-radius: 8px;
+            border: 1px solid rgba(51, 65, 85, 0.3);
+            width: 90%;
+        }
+
+        /* Loop Arrows */
+        .loop-arrow {
+            position: absolute;
+            top: 28px;
+            left: 0;
+            height: 2px;
+            background-color: #475569;
+            width: 100%;
+            z-index: 1;
+        }
+        /* Arrow from Act (3) extends into Observe (4) so it connects visually */
+        .loop-arrow-to-observe {
+            width: 200%;
+        }
+        
+        .arrow-head {
+            position: absolute;
+            right: 0;
+            top: -4px;
+            width: 0;
+            height: 0;
+            border-top: 5px solid transparent;
+            border-bottom: 5px solid transparent;
+            border-left: 8px solid #475569;
+        }
+
+        /* Labels and Icons */
+        .card-icon-wrapper {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 0.75rem;
+            font-size: 1.25rem;
+            border-width: 1px;
+            border-style: solid;
+        }
+
+        .pill-label {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background-color: rgba(255, 255, 255, 0.1);
+            color: #94A3B8;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+        
+        .step-number {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            width: 18px;
+            height: 18px;
+            background-color: #38BDF8;
+            color: #0F172A;
+            border-radius: 50%;
+            font-size: 0.65rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .feature-list p {
+            position: relative;
+            padding-left: 1rem;
+        }
+        .feature-list p::before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: currentColor;
+            opacity: 0.7;
+        }
+
+    </style>
+</head>
+<body>
+<div class="slide-container">
+<!-- Background -->
+<div class="bg-grid"></div>
+<!-- Header -->
+<div class="relative z-10 px-12 pt-6 pb-2 flex justify-between items-end border-b border-gray-800 bg-opacity-90 bg-slate-900">
+<div>
+<p class="text-slate-400 text-xs font-semibold tracking-wider uppercase mb-1">Architecture &amp; Workflow</p>
+<h1 class="font-heading text-3xl font-bold text-white">The Anatomy of an AI Agent</h1>
+</div>
+</div>
+<!-- Top Section: 4-Part Anatomy -->
+<div class="top-section">
+<div class="absolute top-4 left-8 text-slate-500 text-xs uppercase tracking-widest font-bold">Part 1: Four-Part Anatomy</div>
+<!-- SVG Connectors indicating system integration -->
+<svg class="connector-layer" height="360" width="1280">
+<defs>
+<marker id="arrowhead-gray" markerheight="7" markerwidth="10" orient="auto" refx="9" refy="3.5">
+<polygon fill="#475569" points="0 0, 10 3.5, 0 7"></polygon>
+</marker>
+</defs>
+<!-- Dashed line connecting components behind the cards -->
+<path d="M 240 180 L 1040 180" fill="none" opacity="0.2" stroke="#94A3B8" stroke-dasharray="8" stroke-width="2"></path>
+</svg>
+<div class="anatomy-grid">
+<!-- 1. The Brain -->
+<div class="arch-card card-brain">
+<span class="pill-label border border-purple-800 text-purple-300 bg-purple-900 bg-opacity-30">Core Engine</span>
+<div class="card-icon-wrapper bg-purple-900 text-purple-300 border-purple-600 shadow-lg shadow-purple-900/30">
+<i class="fa-solid fa-brain"></i>
+</div>
+<h2 class="font-heading font-bold text-xl text-white mb-1">The Brain</h2>
+<p class="text-purple-200 text-xs font-medium mb-3">LLM &amp; Reasoning</p>
+<div class="w-full bg-slate-900/50 rounded p-3 text-left border border-slate-700 feature-list space-y-1">
+<p class="text-xs text-slate-300">Task Decomposition</p>
+<p class="text-xs text-slate-300">Planning &amp; Reflection</p>
+<p class="text-xs text-slate-300">Decision Making</p>
+</div>
+</div>
+<!-- 2. The Hands -->
+<div class="arch-card card-hands">
+<span class="pill-label border border-sky-800 text-sky-300 bg-sky-900 bg-opacity-30">Tools &amp; Skills</span>
+<div class="card-icon-wrapper bg-sky-900 text-sky-300 border-sky-600 shadow-lg shadow-sky-900/30">
+<i class="fa-solid fa-hand-holding-magic"></i>
+</div>
+<h2 class="font-heading font-bold text-xl text-white mb-1">The Hands</h2>
+<p class="text-sky-200 text-xs font-medium mb-3">Interaction Protocols</p>
+<div class="w-full bg-slate-900/50 rounded p-3 text-left border border-slate-700 feature-list space-y-1">
+<p class="text-xs text-slate-300">Web Browsing</p>
+<p class="text-xs text-slate-300">Code Execution</p>
+<p class="text-xs text-slate-300">API Connectors (MCP)</p>
+</div>
+</div>
+<!-- 3. The Memory -->
+<div class="arch-card card-memory">
+<span class="pill-label border border-emerald-800 text-emerald-300 bg-emerald-900 bg-opacity-30">Storage</span>
+<div class="card-icon-wrapper bg-emerald-900 text-emerald-300 border-emerald-600 shadow-lg shadow-emerald-900/30">
+<i class="fa-solid fa-database"></i>
+</div>
+<h2 class="font-heading font-bold text-xl text-white mb-1">The Memory</h2>
+<p class="text-emerald-200 text-xs font-medium mb-3">Context &amp; Knowledge</p>
+<div class="w-full bg-slate-900/50 rounded p-3 text-left border border-slate-700 feature-list space-y-1">
+<p class="text-xs text-slate-300">Short-term Context</p>
+<p class="text-xs text-slate-300">Vector DB (RAG)</p>
+<p class="text-xs text-slate-300">Past Projects</p>
+</div>
+</div>
+<!-- 4. The Persona -->
+<div class="arch-card card-persona">
+<span class="pill-label border border-rose-800 text-rose-300 bg-rose-900 bg-opacity-30">Guardrails</span>
+<div class="card-icon-wrapper bg-rose-900 text-rose-300 border-rose-600 shadow-lg shadow-rose-900/30">
+<i class="fa-solid fa-user-shield"></i>
+</div>
+<h2 class="font-heading font-bold text-xl text-white mb-1">The Persona</h2>
+<p class="text-rose-200 text-xs font-medium mb-3">Role &amp; Constraints</p>
+<div class="w-full bg-slate-900/50 rounded p-3 text-left border border-slate-700 feature-list space-y-1">
+<p class="text-xs text-slate-300">System Prompts</p>
+<p class="text-xs text-slate-300">Safety Logic</p>
+<p class="text-xs text-slate-300">Role Definition</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom Section: Agent Loop -->
+<div class="bottom-section">
+<div class="absolute top-4 left-8 text-slate-500 text-xs uppercase tracking-widest font-bold">Part 2: The Agent Loop</div>
+<div class="loop-container">
+<!-- Step 1: Perceive -->
+<div class="loop-step">
+<div class="loop-arrow">
+<div class="arrow-head"></div>
+</div>
+<div class="step-circle border-indigo-500 text-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.3)]">
+<i class="fa-solid fa-eye"></i>
+<div class="step-number">1</div>
+</div>
+<div class="step-content">
+<h3 class="text-indigo-300 font-bold mb-1">Perceive</h3>
+<p class="text-xs text-slate-400">Read goal &amp; context</p>
+</div>
+</div>
+<!-- Step 2: Plan -->
+<div class="loop-step">
+<div class="loop-arrow">
+<div class="arrow-head"></div>
+</div>
+<div class="step-circle border-purple-500 text-purple-400 shadow-[0_0_15px_rgba(168,85,247,0.3)]">
+<i class="fa-solid fa-chess-knight"></i>
+<div class="step-number">2</div>
+</div>
+<div class="step-content">
+<h3 class="text-purple-300 font-bold mb-1">Plan</h3>
+<p class="text-xs text-slate-400">Decompose task &amp; select tools</p>
+</div>
+</div>
+<!-- Step 3: Act -->
+<div class="loop-step">
+<div class="loop-arrow loop-arrow-to-observe">
+<div class="arrow-head"></div>
+</div>
+<div class="step-circle border-sky-500 text-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.3)]">
+<i class="fa-solid fa-play"></i>
+<div class="step-number">3</div>
+</div>
+<div class="step-content">
+<h3 class="text-sky-300 font-bold mb-1">Act</h3>
+<p class="text-xs text-slate-400">Execute code &amp; call APIs</p>
+</div>
+</div>
+<!-- Step 4: Observe -->
+<div class="loop-step">
+<div class="loop-arrow" style="display: none;">
+<!-- Last arrow loops back conceptually -->
+</div>
+<div class="step-circle border-emerald-500 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+<i class="fa-solid fa-magnifying-glass-chart"></i>
+<div class="step-number">4</div>
+</div>
+<div class="step-content">
+<h3 class="text-emerald-300 font-bold mb-1">Observe</h3>
+<p class="text-xs text-slate-400">Evaluate results &amp; iterate</p>
+</div>
+</div>
+</div>
+<!-- Return Loop Visual -->
+<svg class="absolute bottom-0 w-full h-12 pointer-events-none" style="z-index: 1;">
+<path d="M 1080 30 C 1150 30, 1200 60, 1200 100" fill="none" opacity="0.3" stroke="#475569" stroke-dasharray="4" stroke-width="2"></path>
+<path d="M 200 30 C 130 30, 80 60, 80 100" fill="none" opacity="0.3" stroke="#475569" stroke-dasharray="4" stroke-width="2"></path>
+<line opacity="0.3" stroke="#475569" stroke-dasharray="4" stroke-width="2" x1="80" x2="1200" y1="100" y2="100"></line>
+</svg>
+</div>
+</div>
+</body>
+</html>

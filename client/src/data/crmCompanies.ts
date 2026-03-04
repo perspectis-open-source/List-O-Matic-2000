@@ -1,0 +1,57 @@
+/**
+ * System list of 500 companies as would be extracted from a CRM.
+ * Not imported by the user — these sit in the system.
+ */
+
+const SEED_COMPANIES = [
+  'Coca-Cola',
+  'Colgate-Palmolive',
+  'Costco Wholesale',
+  'Cadbury',
+  'Caterpillar',
+  'Comcast',
+  'Chevron',
+  'Chrysler',
+  'Citigroup',
+  'Cisco',
+  "Campbell's",
+  'Conagra',
+  'Cardinal Health',
+  'Cigna',
+  'CVS Health',
+  'PepsiCo',
+  'Unilever',
+  'Amazon',
+  'Microsoft',
+  'Apple',
+  'Walmart',
+  'Target',
+  'Ford',
+  'Disney',
+  'Netflix',
+]
+
+const PREFIXES = [
+  'Global', 'United', 'National', 'American', 'Pacific', 'Atlantic', 'Premier', 'Summit', 'Apex', 'Vertex',
+  'Prime', 'Elite', 'Core', 'First', 'Main', 'Central', 'Metro', 'Urban', 'North', 'South',
+]
+const STEMS = [
+  'Tech', 'Systems', 'Solutions', 'Services', 'Industries', 'Group', 'Partners', 'Holdings', 'Ventures', 'Capital',
+  'Medical', 'Health', 'Energy', 'Finance', 'Legal', 'Media', 'Retail', 'Logistics', 'Manufacturing', 'Consulting',
+]
+const SUFFIXES = ['Inc', 'Corp', 'LLC', 'Ltd', 'Co', 'Company', 'Group', 'Partners']
+
+function generateCompanyName(i: number): string {
+  const p = PREFIXES[i % PREFIXES.length]
+  const s = STEMS[Math.floor(i / PREFIXES.length) % STEMS.length]
+  const suf = SUFFIXES[i % SUFFIXES.length]
+  return `${p} ${s} ${suf}`
+}
+
+const EXTRA_COUNT = 500 - SEED_COMPANIES.length
+const generated: string[] = []
+for (let i = 0; i < EXTRA_COUNT; i++) {
+  generated.push(generateCompanyName(i))
+}
+
+export const CRM_COMPANIES: string[] = [...SEED_COMPANIES, ...generated]

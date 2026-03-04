@@ -7,6 +7,7 @@ type Props = {
   companyColumnKey: string | null
   value: string | null
   onChange: (company: string | null) => void
+  onInputValueChange?: (input: string) => void
   onSelectForChat?: (company: string) => void
   disabled?: boolean
 }
@@ -16,10 +17,15 @@ export function CompanySelect({
   companyColumnKey,
   value,
   onChange,
+  onInputValueChange,
   onSelectForChat,
   disabled,
 }: Props) {
   const [inputValue, setInputValue] = useState('')
+  const handleInputChange = (_: unknown, newInput: string) => {
+    setInputValue(newInput)
+    onInputValueChange?.(newInput)
+  }
 
   const uniqueCompanies = useMemo(() => {
     if (!companyColumnKey || !contacts.length) return []
@@ -41,12 +47,13 @@ export function CompanySelect({
 
   return (
     <Autocomplete
+      freeSolo
       value={value}
-      onChange={(_, newValue) => onChange(newValue)}
+      onChange={(_, newValue) => onChange(typeof newValue === 'string' ? newValue.trim() || null : newValue)}
       inputValue={inputValue}
-      onInputChange={(_, newInput) => setInputValue(newInput)}
+      onInputChange={handleInputChange}
       options={filteredOptions}
-      getOptionLabel={(opt) => opt}
+      getOptionLabel={(opt) => (typeof opt === 'string' ? opt : '')}
       renderInput={(params) => (
         <TextField
           {...params}
