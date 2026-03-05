@@ -21,26 +21,23 @@ function compare(a: string, b: string, dir: 'asc' | 'desc'): number {
 }
 
 export function ContactsTable({ contacts, headers, maxHeight = 500, companyColumnKey, entityColumnKey }: Props) {
-  const [sortKey, setSortKey] = useState<string | null>(null)
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null)
 
   const sortedContacts = useMemo(() => {
-    if (!sortKey) return [...contacts]
+    if (!sort) return [...contacts]
     return [...contacts].sort((ra, rb) => {
-      const a = String(ra[sortKey] ?? '')
-      const b = String(rb[sortKey] ?? '')
-      return compare(a, b, sortDir)
+      const a = String(ra[sort.key] ?? '')
+      const b = String(rb[sort.key] ?? '')
+      return compare(a, b, sort.dir)
     })
-  }, [contacts, sortKey, sortDir])
+  }, [contacts, sort])
 
   const handleSort = useCallback((key: string) => {
-    setSortKey((prev) => {
-      if (prev === key) {
-        setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-        return key
+    setSort((prev) => {
+      if (prev?.key === key) {
+        return { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
       }
-      setSortDir('asc')
-      return key
+      return { key, dir: 'asc' }
     })
   }, [])
 
@@ -80,14 +77,14 @@ export function ContactsTable({ contacts, headers, maxHeight = 500, companyColum
           borderColor: 'divider',
           bgcolor: 'background.paper',
           fontWeight: 600,
-          fontSize: '0.875rem',
+          fontSize: '1rem',
         }}
       >
         {headers.map((h) => (
           <Box key={h} sx={{ px: 1.5, py: 1.25, display: 'flex', alignItems: 'center' }}>
             <TableSortLabel
-              active={sortKey === h}
-              direction={sortKey === h ? sortDir : 'asc'}
+              active={sort?.key === h}
+              direction={sort?.key === h ? sort.dir : 'asc'}
               onClick={() => handleSort(h)}
             >
               {h}
@@ -114,7 +111,7 @@ export function ContactsTable({ contacts, headers, maxHeight = 500, companyColum
                   borderBottom: 1,
                   borderColor: 'divider',
                   alignItems: 'center',
-                  fontSize: '0.875rem',
+                  fontSize: '1rem',
                   '& > *': {
                     px: 1.5,
                     py: 0,

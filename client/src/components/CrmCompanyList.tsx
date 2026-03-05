@@ -46,7 +46,7 @@ export function CrmCompanyList({ companies, maxHeight = 520 }: Props) {
           borderColor: 'divider',
           bgcolor: 'action.hover',
           fontWeight: 600,
-          fontSize: '0.875rem',
+          fontSize: '1rem',
         }}
       >
         <TableSortLabel
@@ -92,7 +92,7 @@ export function CrmCompanyList({ companies, maxHeight = 520 }: Props) {
                   '&:hover': { bgcolor: 'action.hover' },
                 }}
               >
-                <Typography variant="body2" noWrap>
+                <Typography variant="body2" noWrap sx={{ fontSize: '1rem' }}>
                   {name}
                 </Typography>
               </Box>

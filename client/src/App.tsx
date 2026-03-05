@@ -17,13 +17,16 @@ import {
   List,
   ListItem,
   ListItemText,
+  Checkbox,
   TextField,
   Dialog,
   DialogTitle,
   DialogContent,
-  Checkbox,
-  FormControlLabel,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { keyframes } from '@mui/system'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
@@ -62,19 +65,18 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
   const [companyInputValue, setCompanyInputValue] = useState('')
   const [matchingCompanyNames, setMatchingCompanyNames] = useState<string[]>([])
+  const [excludedMatchNames, setExcludedMatchNames] = useState<string[]>([])
   const [inferredParentCompany, setInferredParentCompany] = useState<string | null>(null)
+  const [overrideCompanyName, setOverrideCompanyName] = useState<string | null>(null)
+  const [companyNameOverrideInput, setCompanyNameOverrideInput] = useState('')
   const [activeTab, setActiveTab] = useState<TabValue>('contacts')
   const [aiSearchLoading, setAiSearchLoading] = useState(false)
   const [aiSearchError, setAiSearchError] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   const [reasoningSteps, setReasoningSteps] = useState<ReasoningStep[] | null>(null)
   const [toolCalls, setToolCalls] = useState<ToolCall[] | null>(null)
-  const [lastAiSearchMessage, setLastAiSearchMessage] = useState<string | null>(null)
-  const [refineInput, setRefineInput] = useState('')
-  const [refineLoading, setRefineLoading] = useState(false)
   const [processLogLines, setProcessLogLines] = useState<string[]>([])
   const processLogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const [exactMatch, setExactMatch] = useState(false)
   const [featureTab, setFeatureTab] = useState<FeatureTab>('contactSearch')
   const [contactMatchTab, setContactMatchTab] = useState<ContactMatchTabValue>('companies')
   const [crmCompaniesList, setCrmCompaniesList] = useState<string[]>([])
@@ -93,12 +95,13 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     setParseError(null)
     setSelectedCompany(null)
     setMatchingCompanyNames([])
+    setExcludedMatchNames([])
     setAiSearchError(null)
     setExportError(null)
     setReasoningSteps(null)
     setToolCalls(null)
-    setLastAiSearchMessage(null)
-    setRefineInput('')
+    setOverrideCompanyName(null)
+    setCompanyNameOverrideInput('')
     try {
       const { data, headers: h, companyColumnKey: key, entityColumnKey: entityKey } = await parseContactFile(file)
       setContacts(data)
@@ -194,23 +197,27 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
 
   const aiResultsContacts = useMemo(() => {
     if (!companyColumnKey || matchingCompanyNames.length === 0) return []
-    const set = new Set(
-      matchingCompanyNames.map((n) => String(n).trim()).filter(Boolean)
-    )
+    const excludedSet = new Set(excludedMatchNames.map((n) => String(n).trim()).filter(Boolean))
+    const includedNames = matchingCompanyNames
+      .map((n) => String(n).trim())
+      .filter((n) => n && !excludedSet.has(n))
+    if (includedNames.length === 0) return []
+    const set = new Set(includedNames)
     return contacts.filter((row) => {
       const cell = String((row[companyColumnKey] ?? '')).trim()
       return cell && set.has(cell)
     })
-  }, [contacts, companyColumnKey, matchingCompanyNames])
+  }, [contacts, companyColumnKey, matchingCompanyNames, excludedMatchNames])
 
   const { aiResultsHeaders, aiResultsContactsWithDescription } = useMemo(() => {
     const extendedHeaders = [...headers, 'Parent company']
     const withDescription: ContactRow[] = aiResultsContacts.map((row) => ({
       ...row,
       'Parent company': inferredParentCompany ?? '',
+      ...(companyColumnKey != null && overrideCompanyName != null ? { [companyColumnKey]: overrideCompanyName } : {}),
     }))
     return { aiResultsHeaders: extendedHeaders, aiResultsContactsWithDescription: withDescription }
-  }, [headers, aiResultsContacts, inferredParentCompany])
+  }, [headers, aiResultsContacts, inferredParentCompany, overrideCompanyName, companyColumnKey])
 
   const effectiveCompany = (selectedCompany?.trim() || companyInputValue?.trim() || '') || null
 
@@ -219,19 +226,11 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     if (!company || !companyColumnKey || aiSearchLoading) return
     setAiSearchError(null)
 
-    if (exactMatch) {
-      setReasoningSteps(null)
-      setToolCalls(null)
-      setLastAiSearchMessage(`Find everyone that works at ${company} (exact match only)`)
-      setMatchingCompanyNames([company.trim()])
-      setInferredParentCompany(company.trim())
-      setActiveTab('aiResults')
-      return
-    }
-
     setReasoningSteps(null)
     setToolCalls(null)
     setInferredParentCompany(null)
+    setOverrideCompanyName(null)
+    setCompanyNameOverrideInput('')
     setProcessLogLines([])
     setAiSearchLoading(true)
 
@@ -257,7 +256,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
 
     try {
       const message = `Find everyone that works at ${company}`
-      setLastAiSearchMessage(message)
       const res = await postChat([{ role: 'user', content: message }], uniqueCompanyNames)
       if (processLogIntervalRef.current) {
         clearInterval(processLogIntervalRef.current)
@@ -265,6 +263,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
       }
       setProcessLogLines((prev) => [...prev, 'LLM: Complete.'])
       setMatchingCompanyNames(res.matchingCompanyNames ?? [])
+      setExcludedMatchNames([])
       setInferredParentCompany(res.parentCompany ?? null)
       setReasoningSteps(res.reasoningSteps ?? null)
       setToolCalls(res.toolCalls ?? null)
@@ -278,68 +277,13 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
       setProcessLogLines((prev) => [...prev, `LLM: Error — ${e instanceof Error ? e.message : 'Request failed'}`])
       setAiSearchError(e instanceof Error ? e.message : 'Request failed')
       setMatchingCompanyNames([])
+      setExcludedMatchNames([])
       setInferredParentCompany(null)
       setReasoningSteps(null)
       setToolCalls(null)
       setTimeout(() => setAiSearchLoading(false), 2000)
     }
-  }, [effectiveCompany, companyColumnKey, uniqueCompanyNames, aiSearchLoading, exactMatch])
-
-  const handleRefine = useCallback(async () => {
-    const trimmed = refineInput.trim()
-    if (!trimmed || !lastAiSearchMessage || !companyColumnKey || refineLoading) return
-    setAiSearchError(null)
-    setProcessLogLines([])
-    setRefineLoading(true)
-
-    const refineLogLines = [
-      'LLM: Refining results...',
-      'LLM: Sending previous matches and your instruction...',
-      'LLM: Identifying parent and subsidiaries from instruction...',
-      'LLM: Updating match list...',
-      'LLM: Validating matches...',
-      'LLM: Preparing updated results...',
-    ]
-    let step = 0
-    processLogIntervalRef.current = setInterval(() => {
-      setProcessLogLines((prev) => (step < refineLogLines.length ? [...prev, refineLogLines[step++]] : prev))
-      if (step >= refineLogLines.length && processLogIntervalRef.current) {
-        clearInterval(processLogIntervalRef.current)
-        processLogIntervalRef.current = null
-      }
-    }, 600)
-
-    try {
-      const res = await postChat(
-        [
-          { role: 'user', content: lastAiSearchMessage },
-          { role: 'user', content: trimmed },
-        ],
-        uniqueCompanyNames,
-        matchingCompanyNames,
-        selectedCompany ?? undefined
-      )
-      if (processLogIntervalRef.current) {
-        clearInterval(processLogIntervalRef.current)
-        processLogIntervalRef.current = null
-      }
-      setProcessLogLines((prev) => [...prev, 'LLM: Complete.'])
-      setMatchingCompanyNames(res.matchingCompanyNames ?? [])
-      if (res.parentCompany != null) setInferredParentCompany(res.parentCompany)
-      setReasoningSteps(res.reasoningSteps ?? null)
-      setToolCalls(res.toolCalls ?? null)
-      setRefineInput('')
-      setTimeout(() => setRefineLoading(false), 1200)
-    } catch (e) {
-      if (processLogIntervalRef.current) {
-        clearInterval(processLogIntervalRef.current)
-        processLogIntervalRef.current = null
-      }
-      setProcessLogLines((prev) => [...prev, `LLM: Error — ${e instanceof Error ? e.message : 'Refine request failed'}`])
-      setAiSearchError(e instanceof Error ? e.message : 'Refine request failed')
-      setTimeout(() => setRefineLoading(false), 2000)
-    }
-  }, [refineInput, lastAiSearchMessage, selectedCompany, companyColumnKey, uniqueCompanyNames, matchingCompanyNames, refineLoading])
+  }, [effectiveCompany, companyColumnKey, uniqueCompanyNames, aiSearchLoading])
 
   const handleExportResults = useCallback(() => {
     setExportError(null)
@@ -394,10 +338,10 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
         onFileAccepted={handleContactListFileAccepted}
       />
 
-      <Dialog open={aiSearchLoading || refineLoading} disableEscapeKeyDown maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 2 } }}>
+      <Dialog open={aiSearchLoading} disableEscapeKeyDown maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 2 } }}>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <CircularProgress size={24} color="primary" />
-          {refineLoading ? 'LLM refining results...' : 'LLM searching...'}
+          LLM searching...
         </DialogTitle>
         <DialogContent>
           <Box
@@ -602,17 +546,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                   onInputValueChange={setCompanyInputValue}
                   disabled={!companyColumnKey}
                 />
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={exactMatch}
-                      onChange={(e) => setExactMatch(e.target.checked)}
-                      size="small"
-                    />
-                  }
-                  label="Exact match"
-                  sx={{ ml: 0.5 }}
-                />
                 <Button
                   variant="contained"
                   startIcon={aiSearchLoading ? <CircularProgress size={18} color="inherit" /> : <SearchIcon />}
@@ -655,103 +588,133 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                   </Box>
                 ) : (
                   <>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                      <Typography variant="subtitle2" color="primary">
-                        {aiResultsContacts.length.toLocaleString()} contacts matching your search.
-                      </Typography>
-                      <Button
-                        variant="contained"
-                        size="small"
-                        startIcon={<DownloadIcon />}
-                        onClick={handleExportResults}
-                      >
-                        Export results
-                      </Button>
-                    </Box>
-                    {exportError && (
-                      <Alert severity="error" onClose={() => setExportError(null)} sx={{ mb: 2 }}>
-                        {exportError}
-                      </Alert>
-                    )}
+                    <Typography variant="subtitle2" color="primary" sx={{ mb: 2 }}>
+                      {aiResultsContacts.length.toLocaleString()} contacts matching your search.
+                    </Typography>
                     {toolCalls != null && toolCalls.length > 0 && (
-                      <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 2 }}>
-                        <Typography variant="subtitle2" color="primary" gutterBottom>
-                          Agent looked up
-                        </Typography>
-                        <List dense disablePadding>
-                          {toolCalls.map((tc, i) => (
-                            <ListItem key={i} sx={{ py: 0.25, display: 'block' }}>
-                              <Typography variant="body2" component="span">
-                                Searched: &quot;{tc.query ?? '—'}&quot;
-                                {tc.summary ? ` — ${tc.summary}` : ''}
-                              </Typography>
-                            </ListItem>
-                          ))}
-                        </List>
-                      </Paper>
+                      <Accordion defaultExpanded={false} sx={{ mb: 2, borderRadius: 2, '&:before': { display: 'none' }, border: 1, borderColor: 'divider' }}>
+                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                          <Typography variant="subtitle2" color="primary">
+                            Agent looked up
+                          </Typography>
+                        </AccordionSummary>
+                        <AccordionDetails sx={{ pt: 0 }}>
+                          <List dense disablePadding>
+                            {toolCalls.map((tc, i) => (
+                              <ListItem key={i} sx={{ py: 0.25, display: 'block' }}>
+                                <Typography variant="body2" component="span">
+                                  Searched: &quot;{tc.query ?? '—'}&quot;
+                                  {tc.summary ? ` — ${tc.summary}` : ''}
+                                </Typography>
+                              </ListItem>
+                            ))}
+                          </List>
+                        </AccordionDetails>
+                      </Accordion>
                     )}
                     {reasoningSteps != null && reasoningSteps.length > 0 && (
-                      <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 2 }}>
-                        <Typography variant="subtitle2" color="primary" gutterBottom>
-                          How the agent matched
-                        </Typography>
-                        <List dense disablePadding>
-                          {reasoningSteps.map((step, i) => (
-                            <ListItem key={i} sx={{ py: 0.25, display: 'block' }}>
-                              <Typography variant="body2" fontWeight={600} component="span">
-                                {step.title}
-                              </Typography>
-                              {step.detail && (
-                                <Typography variant="body2" color="text.secondary" component="span" sx={{ ml: 0.5 }}>
-                                  — {step.detail}
+                      <Accordion defaultExpanded={false} sx={{ mb: 2, borderRadius: 2, '&:before': { display: 'none' }, border: 1, borderColor: 'divider' }}>
+                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                          <Typography variant="subtitle2" color="primary">
+                            How the agent matched
+                          </Typography>
+                        </AccordionSummary>
+                        <AccordionDetails sx={{ pt: 0 }}>
+                          <List dense disablePadding>
+                            {reasoningSteps.map((step, i) => (
+                              <ListItem key={i} sx={{ py: 0.25, display: 'block' }}>
+                                <Typography variant="body2" fontWeight={600} component="span">
+                                  {step.title}
                                 </Typography>
-                              )}
-                            </ListItem>
-                          ))}
-                        </List>
-                      </Paper>
+                                {step.detail && (
+                                  <Typography variant="body2" color="text.secondary" component="span" sx={{ ml: 0.5 }}>
+                                    — {step.detail}
+                                  </Typography>
+                                )}
+                              </ListItem>
+                            ))}
+                          </List>
+                        </AccordionDetails>
+                      </Accordion>
                     )}
+                    <Accordion defaultExpanded={false} sx={{ mb: 2, borderRadius: 2, '&:before': { display: 'none' }, border: 1, borderColor: 'divider' }}>
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Typography variant="subtitle2" color="primary">
+                          List entries matched to parent company
+                        </Typography>
+                      </AccordionSummary>
+                      <AccordionDetails sx={{ pt: 0 }}>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                          {matchingCompanyNames.length} string(s) from your upload that the LLM matched to the parent company. These are not company names—they are the bad data (variants, misspellings, brand names as entered) that will be normalized to the parent.
+                        </Typography>
+                        <List dense sx={{ maxHeight: 200, overflowY: 'scroll' }}>
+                          {(() => {
+                            const excludedSet = new Set(excludedMatchNames)
+                            return [...matchingCompanyNames].sort((a, b) => a.localeCompare(b)).map((name) => {
+                              const included = !excludedSet.has(name)
+                              return (
+                              <ListItem
+                                key={name}
+                                sx={{ py: 0 }}
+                                disablePadding
+                              >
+                                <Checkbox
+                                  size="small"
+                                  checked={included}
+                                  onChange={() => {
+                                    setExcludedMatchNames((prev) =>
+                                      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+                                    )
+                                  }}
+                                  sx={{ py: 0, mr: 1 }}
+                                />
+                                <ListItemText primary={name} primaryTypographyProps={{ variant: 'body2' }} />
+                              </ListItem>
+                              )
+                            })
+                          })()}
+                        </List>
+                      </AccordionDetails>
+                    </Accordion>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap' }}>
                       <TextField
                         size="small"
-                        label="Refine results"
-                        placeholder="e.g. Also include bottling plants or Exclude subsidiaries"
-                        value={refineInput}
-                        onChange={(e) => setRefineInput(e.target.value)}
-                        disabled={refineLoading}
+                        label="Set company name for all results"
+                        placeholder="e.g. Apple Inc."
+                        value={companyNameOverrideInput}
+                        onChange={(e) => setCompanyNameOverrideInput(e.target.value)}
                         sx={{ minWidth: 280, flex: 1 }}
                       />
                       <Button
                         variant="outlined"
                         size="small"
-                        onClick={handleRefine}
-                        disabled={!refineInput.trim() || refineLoading}
-                        startIcon={refineLoading ? <CircularProgress size={16} color="inherit" /> : undefined}
+                        onClick={() => {
+                          const v = companyNameOverrideInput.trim()
+                          setOverrideCompanyName(v || null)
+                        }}
                       >
-                        Refine
+                        Apply
                       </Button>
                     </Box>
-                    <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 2 }}>
-                      <Typography variant="subtitle2" color="primary" gutterBottom>
-                        List entries matched to parent company
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                        {matchingCompanyNames.length} string(s) from your upload that the LLM matched to the parent company. These are not company names—they are the bad data (variants, misspellings, brand names as entered) that will be normalized to the parent.
-                      </Typography>
-                      <List dense sx={{ maxHeight: 200, overflow: 'auto' }}>
-                        {matchingCompanyNames.sort((a, b) => a.localeCompare(b)).map((name) => (
-                          <ListItem key={name} sx={{ py: 0 }}>
-                            <ListItemText primary={name} primaryTypographyProps={{ variant: 'body2' }} />
-                          </ListItem>
-                        ))}
-                      </List>
-                    </Paper>
                     <Box sx={{ mt: 2 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 1 }}>
                         <Typography variant="subtitle2" color="primary">
                           Results table — {aiResultsContactsWithDescription.length.toLocaleString()} row{aiResultsContactsWithDescription.length !== 1 ? 's' : ''}
                         </Typography>
+                        <Button
+                          variant="contained"
+                          size="small"
+                          startIcon={<DownloadIcon />}
+                          onClick={handleExportResults}
+                        >
+                          Export results
+                        </Button>
                       </Box>
+                      {exportError && (
+                        <Alert severity="error" onClose={() => setExportError(null)} sx={{ mb: 1 }}>
+                          {exportError}
+                        </Alert>
+                      )}
                       <Box sx={{ minHeight: 440 }}>
                         <ContactsTable
                           contacts={aiResultsContactsWithDescription}

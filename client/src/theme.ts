@@ -9,6 +9,7 @@ const SLATE_700 = '#334155'
 const SLATE_800 = '#1E293B'
 const SLATE_900 = '#0F172A'
 const SKY_400 = '#38BDF8'
+const SKY_600 = '#0284c7' // darker blue for light mode (better contrast)
 const ACCENT_TINT = 'rgba(56, 189, 248, 0.1)'
 const ACCENT_BORDER = 'rgba(56, 189, 248, 0.3)'
 const SURFACE_TRANSLUCENT = 'rgba(30, 41, 59, 0.8)'
@@ -22,13 +23,15 @@ const FONT_HEADING = '"Space Grotesk", "Inter", sans-serif'
 
 export function getAppTheme(mode: PaletteMode) {
   const isDark = mode === 'dark'
+  const primaryMain = isDark ? SKY_400 : SKY_600
+  const primaryContrast = isDark ? SLATE_900 : '#ffffff'
   return createTheme({
     shape: { borderRadius: 8 },
     palette: {
       mode,
       primary: {
-        main: SKY_400,
-        contrastText: SLATE_900,
+        main: primaryMain,
+        contrastText: primaryContrast,
       },
       secondary: {
         main: SLATE_600,
@@ -36,7 +39,7 @@ export function getAppTheme(mode: PaletteMode) {
       },
       success: { main: EMERALD },
       error: { main: ROSE },
-      info: { main: SKY_400 },
+      info: { main: primaryMain },
       warning: { main: PURPLE },
       background: isDark
         ? { default: SLATE_900, paper: SLATE_800 }
@@ -48,20 +51,27 @@ export function getAppTheme(mode: PaletteMode) {
     },
     typography: {
       fontFamily: FONT_BODY,
-      h1: { fontFamily: FONT_HEADING, fontWeight: 700 },
-      h2: { fontFamily: FONT_HEADING, fontWeight: 600 },
-      h3: { fontFamily: FONT_HEADING, fontWeight: 600 },
-      h4: { fontFamily: FONT_HEADING, fontWeight: 600 },
-      h5: { fontFamily: FONT_HEADING, fontWeight: 600 },
-      h6: { fontFamily: FONT_HEADING, fontWeight: 600 },
-      button: { fontFamily: FONT_BODY, fontWeight: 500 },
+      fontSize: 16,
+      body1: { fontSize: '1.125rem' },
+      body2: { fontSize: '1rem' },
+      subtitle1: { fontSize: '1.125rem' },
+      subtitle2: { fontSize: '1rem' },
+      button: { fontFamily: FONT_BODY, fontWeight: 500, fontSize: '1rem' },
+      caption: { fontSize: '0.875rem' },
+      overline: { fontSize: '0.875rem' },
+      h1: { fontFamily: FONT_HEADING, fontWeight: 700, fontSize: '2.25rem' },
+      h2: { fontFamily: FONT_HEADING, fontWeight: 600, fontSize: '1.625rem' },
+      h3: { fontFamily: FONT_HEADING, fontWeight: 600, fontSize: '1.375rem' },
+      h4: { fontFamily: FONT_HEADING, fontWeight: 600, fontSize: '1.25rem' },
+      h5: { fontFamily: FONT_HEADING, fontWeight: 600, fontSize: '1.125rem' },
+      h6: { fontFamily: FONT_HEADING, fontWeight: 600, fontSize: '1.125rem' },
     },
     components: {
       MuiCssBaseline: {
         styleOverrides: {
           body: { fontFamily: FONT_BODY },
           '*:focus-visible': {
-            outline: `2px solid ${SKY_400}`,
+            outline: `2px solid ${primaryMain}`,
             outlineOffset: 2,
           },
           '.MuiTab-root:focus-visible': {
@@ -82,13 +92,13 @@ export function getAppTheme(mode: PaletteMode) {
         styleOverrides: {
           root: {
             '&:focus-visible': {
-              outline: `2px solid ${SKY_400}`,
+              outline: `2px solid ${primaryMain}`,
               outlineOffset: 2,
             },
           },
           containedPrimary: {
-            backgroundColor: SKY_400,
-            color: SLATE_900,
+            backgroundColor: primaryMain,
+            color: primaryContrast,
             '&:hover': {
               filter: 'brightness(1.1)',
             },
@@ -99,7 +109,7 @@ export function getAppTheme(mode: PaletteMode) {
         styleOverrides: {
           root: {
             '&:focus-visible': {
-              outline: `2px solid ${SKY_400}`,
+              outline: `2px solid ${primaryMain}`,
               outlineOffset: 2,
             },
           },
@@ -120,7 +130,7 @@ export function getAppTheme(mode: PaletteMode) {
               background: 'none',
             },
             '&:focus-visible': {
-              outline: `2px solid ${SKY_400}`,
+              outline: `2px solid ${primaryMain}`,
               outlineOffset: 2,
               borderRadius: 4,
             },
@@ -136,7 +146,7 @@ export function getAppTheme(mode: PaletteMode) {
             gap: 0,
           },
           indicator: {
-            backgroundColor: SKY_400,
+            backgroundColor: primaryMain,
             height: 3,
           },
         },
@@ -154,7 +164,7 @@ export function getAppTheme(mode: PaletteMode) {
         styleOverrides: {
           standardInfo: {
             backgroundColor: ACCENT_TINT,
-            borderLeft: `4px solid ${SKY_400}`,
+            borderLeft: `4px solid ${primaryMain}`,
           },
           standardSuccess: {
             borderLeft: `4px solid ${EMERALD}`,
@@ -170,7 +180,7 @@ export function getAppTheme(mode: PaletteMode) {
             backgroundColor: ACCENT_TINT,
             border: `1px solid ${ACCENT_BORDER}`,
             color: isDark ? SLATE_50 : SLATE_900,
-            '& .MuiChip-icon': { color: SKY_400 },
+            '& .MuiChip-icon': { color: primaryMain },
           },
         },
       },
@@ -188,6 +198,7 @@ export const slideTokens = {
   SLATE_800,
   SLATE_900,
   SKY_400,
+  SKY_600,
   ACCENT_TINT,
   ACCENT_BORDER,
   PURPLE,
