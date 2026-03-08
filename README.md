@@ -45,7 +45,7 @@ npm run dev
 
 - **client/** — React (Vite), MUI, drag-and-drop upload, table, company select, AI Search button, AI Results tab. Parsing and filtering in the browser; only unique company names sent to the API.
 - **server/** — Express; `POST /api/chat` accepts `{ messages, uniqueCompanyNames }`, calls LLM, returns `{ matchingCompanyNames, explanation? }`. API key in env only.
-- **PLAN.md** — Full specification and implementation steps (Steps 1–9). Use as the single source of truth when building or handing off.
+- **PLAN.md** — Full build plan (sections 1–17). Single source of truth for rebuilding the app from scratch.
 
 ## Demo contact file
 

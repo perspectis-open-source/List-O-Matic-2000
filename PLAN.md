@@ -1,247 +1,417 @@
----
-name: Contacts upload app
-overview: "Marketing-demo app: upload a contact list (with varied company names, e.g. Coke/Coca-Cola), search/select a company, then click AI Search to find everyone at that company. Only unique company names (no PII) are sent to the LLM; the LLM returns which company names match; the frontend filters the contact list locally and shows results in a second tab. No chat UI; AI Search is triggered by a button when a company is selected. PII never leaves the client; context stays small and scalable."
----
+# List-O-Matic 2000 — Full build plan
 
-# Marketing Demo: Contact List + AI Agent (React + Backend)
-
-## Living document — How to use this plan
-
-This plan is intended for **another person or an LLM** to build the application. Use it as the single source of truth.
-
-**→ For what to do *next* (roadmap, phases, releases), see [ROADMAP.md](./ROADMAP.md).**
-
-- **Read the full plan first** to understand the demo goal, constraints (no PII to LLM, batching), and architecture.
-- **Build in order**: Follow **Implementation steps 1–9** in sequence. Each step references tech choices, file structure, and (where relevant) the Production and robustness section.
-- **File structure**: Create the folders and files under **File structure (suggested)**. Keep client and server in one repo (monorepo) unless you prefer separate repos.
-- **When in doubt**: Prefer the plan's wording — e.g. API contract (request/response), validation rules, PII handling, and test coverage. If something is ambiguous, choose the option that matches the Demo goal and PII/scalability constraints.
-- **Updating the plan**: As you build, you may add implementation notes, decisions, or links (e.g. "Implemented in commit X" or "Column key stored in state as `companyColumnKey`"). Keep the plan in version control so it stays a living document.
+This document is the **single source of truth** for rebuilding the application from scratch. Follow sections 1–17 in order. A builder (human or AI) can recreate the complete app using only this file and the repo README for quick reference.
 
 ---
 
-## Demo goal
+## 1. Product overview and constraints
 
-Show how AI can help marketing: **upload a contact list** (25,000 contacts across **25 companies**, 1,000 per company, with varied official names and misspellings per company). User **searches and selects a company** (e.g. Coke), then clicks **AI Search**. The **agent** identifies that company's name variants; the **frontend** filters locally and displays the matching contacts in a **second tab**. **Same file and app support the demo for all 25 companies.** There is **no chat feature** — only company search/select and an AI Search button.
+**What the app does**
 
-## Demo flow (on-stage)
+- User uploads a contact list (CSV or Excel). The app parses it in the browser and shows the data in a **Contacts** tab.
+- User selects a company from an autocomplete (unique company names from the file).
+- User clicks **AI Search**. The frontend sends **only** the list of unique company names (no contact rows, no PII) to the backend. The LLM returns which of those names match the selected company (parent, subsidiaries, brands, misspellings).
+- The frontend filters the **local** contact list by the returned names and shows the result in an **AI Results** tab. No chat UI—only a button-triggered flow.
 
-1. **Drag and drop the file into the app** — User drops the contact CSV/Excel onto the drop zone; the table loads and shows the contacts (25,000 rows across 25 companies) in the **first tab (Contacts)**. **Contact list (PII) stays in the browser** and is never sent to the server or LLM.
-2. **Search and select company** — User types in the company search and selects one (e.g. "Coke" or "Coca-Cola Company").
-3. **AI Search** — User clicks the **AI Search** button. Frontend sends only the **list of unique company names** (no names, emails, or other PII) to the backend, with a synthetic message like "Find everyone that works at [selected company]". The LLM returns the **subset of company names** that match. Frontend **filters the local contact list** by those names and displays the **matching contacts in a second tab** (e.g. "AI Results" or "Results"). LLM does the reasoning; row filtering is local so **no PII leaves the client**.
+**PII rule**
 
-## PII and scalability (constraints)
+- Contact rows (names, emails, phones, etc.) **never** leave the client. Only the array of **unique company name strings** is sent to the API.
 
-- **No PII to the LLM**: The contact list contains names, emails, phones — **do not send it to the backend or LLM**. Only send **company name data** (e.g. the list of unique values in the Company column). The LLM returns which of those company names match the user's query (e.g. "Coke"); the frontend filters the contact list locally and displays results.
-- **Scalable context**: With 25,000 rows, sending full contact data would be a huge context and not scalable. Sending only **unique company names** keeps the prompt small; **batching** handles large name lists at scale.
+**Scalability**
 
-## Maximize LLM use (AI demo principle)
-
-This is an **AI demo**: the value is showing what the model can do, so **maximize the use of the LLM** within the constraint that only company names (no PII) are sent.
-
-- **Let the LLM do**: deciding which company names in the list count as "Coke" (Coca-Cola, regional entities, brands, misspellings) and returning that subset; explaining which names it treated as Coke. The backend sends only the **unique company names** in the prompt; the LLM returns the matching company names (and optional explanation).
-- **Frontend does**: extract unique company names from the contact list, send them to the API, then **filter the local contact list** by the returned company names and display the matching rows (and summary). No PII leaves the client.
-- **Avoid**: sending contact rows (PII) or full contact list to the LLM; hard-coded company lists for matching. Optional: give the LLM a **web search** tool so it can look up "Coca-Cola subsidiaries" and then match against the company name list.
-- **Prompt design**: System prompt should say the model receives a list of company names (no other data) and must return which of those names correspond to the user's query (e.g. Coke), with optional reasoning.
-
-## Goal
-
-- **Contacts**: Drag-and-drop CSV/Excel; parse and display in a table in the **first tab** (frontend-only parsing). Contact list stays in the browser; **never send PII to the backend or LLM**.
-- **Company search + AI Search**: User **searches/selects a company** from the unique company list. When user clicks **AI Search**, frontend sends only **unique company names** and a query derived from the selected company; LLM returns which company names match; frontend filters the contact list locally and displays **all matching contacts in a second tab**. No chat UI. API key stays on the backend.
-
-## Tech choices
-
-- **Frontend**: React (Vite), `papaparse`, `xlsx`, `react-dropzone`, **MUI (Material-UI)** for a professional look. **Theming**: dark and light mode with **bright green** as the accent/primary color (demo-friendly, high visibility).
-- **Testing**: **Vitest** (or Jest) for unit/integration tests (frontend and backend); **Storybook** for component documentation and visual testing; **Playwright** for end-to-end tests. Full test suite organized under client and server with clear boundaries (see File structure and Test suite section).
-- **Backend**: Node + Express (or Fastify) to proxy LLM requests and hold the API key
-- **LLM**: Use **OpenAI** (or another provider; pick one at implementation time). API key in backend env (e.g. `OPENAI_API_KEY`); backend sends only company names to the LLM and returns matching company names (structured JSON). Optional: web-search tool for subsidiary lookup.
-- **Repo layout**: Single **monorepo** with `client/` and `server/` at the root unless the team prefers separate repos.
-
-## Architecture overview
-
-- **Contacts**: Parsed in the browser and shown in the **Contacts** tab. **Contact list never leaves the client.** Frontend derives the list of **unique company names** and sends only that (no PII) when the user clicks AI Search.
-- **AI Search**: User selects a company, then clicks **AI Search**. Frontend sends `{ messages, uniqueCompanyNames }` (e.g. one user message: "Find everyone that works at [selected company]"). Backend builds a prompt with only the company names; LLM returns which names match. Frontend receives the matching company names, filters the **local** contact list, and displays the results in a **second tab** (e.g. "AI Results"). API key stays on the server. **No chat window** — only the button triggers the request.
-
-## Core flows
-
-**Contacts (frontend only)**
-
-1. User drops or selects a file (`.csv` or `.xlsx`).
-2. App reads the file (e.g. `FileReader`), then: `.csv` → Papa Parse → array of objects (first row = keys). `.xlsx` → xlsx library → same shape (first row = headers).
-3. Store result in React state and render a table; columns = object keys so any contact columns (name, email, phone, etc.) show automatically.
-
-**AI Search (frontend + backend, company names only — no PII)**
-
-1. User has already uploaded a contact list (table visible in **Contacts** tab). User **searches and selects a company** (e.g. Coke) from the company search/select.
-2. User clicks **AI Search**. Frontend derives **unique company names** from the contact list and builds a synthetic user message (e.g. "Find everyone that works at [selected company]"). Sends `POST /api/chat` with body `{ messages, uniqueCompanyNames }` — **no contact rows, no names, no emails**.
-3. Backend builds a prompt with only the list of company names and that message. Calls the LLM; LLM returns the **subset of company names** that match. Backend returns `{ matchingCompanyNames: string[], explanation?: string }` to the frontend.
-4. Frontend filters the **local** contact list where Company is in `matchingCompanyNames` and displays **all matching contacts in a second tab** (e.g. "AI Results"). Optionally show count/summary in that tab. PII never left the client.
-
-## Demo scenario (25 companies, reusable for any company)
-
-- **Sample file**: **25,000 contacts** total across **25 companies**. Each company has **1,000 contacts** with the **same naming convention**: a mix of official names, subsidiaries, **misspellings**, and **typos** for that company. **Create a new demo file** (replace the old one) with the company list and conventions below.
-  - **One company is Coke**: 1,000 rows with varied Coke names (Coca-Cola Company, Coca-Cola Ltd, Coke Bottling, Fanta Inc., "Coca Cola", "Coke Botling", "Coca Cola Compnay", etc.) — include **typos and misspellings** in the variant list.
-  - **The other 24 companies**: 1,000 contacts each (24 × 1,000 = 24,000). For each company, use the same convention: multiple official/variant names plus **misspellings and typos** (e.g. "Colgate-Palmoliv", "Costco Wholsale", "Cadbury Schweppes" misspelled, etc.).
-  - **15 companies start with "C"**: So that searching for **Coke** (or any C company) is non-trivial, **15 of the 25 companies** must have names that **start with "C"**. These include Coke plus 14 others (e.g. Colgate, Costco, Cadbury, Caterpillar, Comcast, Chevron, Chrysler, Citigroup, Cisco, Campbell's, Conagra, Cardinal Health, Cigna, CVS, etc.). Each gets 1,000 rows with its own **official names, variants, misspellings, and typos**. The other **10 companies** do not start with C (e.g. PepsiCo, Unilever, Amazon, Microsoft). The LLM will see many C-starting and often typo-heavy company names and must correctly identify only the ones matching the user's selected company.
-  - **Misspellings and typos**: For every company, the generation script must include **intentional misspellings and typos** in the company name variants (e.g. dropped letters, transposed letters, common phonetic errors). This makes the unique company list larger and noisier and better demonstrates the LLM's ability to match despite errors.
-- **Reusable demo**: The same file and app support running the demo for **any of the 25 companies**. User uploads once, then can select Coke, PepsiCo, etc., click **AI Search**, and see the matching contacts in the AI Results tab. The agent identifies that company's name variants and returns the matching contacts each time.
-- **User flow**: Upload file → **Contacts** tab shows 25k contacts → user searches/selects a company → user clicks **AI Search** → **second tab** shows matching contacts (e.g. 1,000 for Coke).
-- **Agent behavior**: Frontend sends unique company names and a query derived from the selected company. LLM returns which names match. Frontend filters locally and displays all matching contacts in the **AI Results** (or Results) tab.
-
-## Frontend: Upload button, drop zone, and table (detailed plan)
-
-Use this as the spec for the upload and file-display UI.
-
-### 1. Upload file button → opens drop zone
-
-- **Primary control**: An **"Upload file"** (or "Upload contacts") button in the UI. The drop zone is **not** visible by default.
-- **On click**: Opening the button reveals or opens the **drop zone** (e.g. in a modal/dialog, or an expandable panel below the button). The drop zone is the area where the user can drag and drop a file or click to choose a file.
-- **Drop zone behavior**: Accept only `.csv` and `.xlsx`. Use `react-dropzone` with `accept: { 'text/csv': ['.csv'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }`. On drop or file select: read the file, parse it (see Parsing below), then **close the drop zone** (or modal) and show the file contents in the table tab.
-
-### 2. Two tabs: Contacts and AI Results
-
-- **Tab 1 — Contacts**: After a file is loaded, show the full file contents in the **first tab** (e.g. "Contacts"). Display the parsed rows as a **table** (or list): one row per contact, columns = first row headers (Name, Email, Company, etc.). No pagination (see next section). Virtualized list for 25k rows.
-- **Tab 2 — AI Results** (or "Results"): This tab shows the **output of the AI Search** — i.e. the contacts that match the company names returned by the LLM. When the user has not yet run AI Search, show an empty state or message (e.g. "Select a company and click AI Search to see matching contacts here"). After AI Search completes, display **all matching contacts** in the same table format (virtualized if needed). An **"Export results"** button downloads the results (including the Description column) as a CSV file (production-grade: filename sanitization, UTF-8 BOM, formula-injection mitigation). The **results table has an extra column: Description** — populated from a client-side mapping (company name → description text), not from the import file. Optionally show count and/or the LLM explanation in this tab. **All companies** (i.e. all matching company name variants) are represented in this tab's output.
-
-### 2b. Search input + company name select list + AI Search button
-
-- **Input box**: Provide an **input box** (search field) that the user can type in to **search for company names**. Use it to filter the options in the select list (see below) as the user types (e.g. substring or case-insensitive match).
-- **Select list (dropdown)**: A **select list** (e.g. MUI `Select` or `Autocomplete`) that is **dynamically populated** with **all unique company names** from the uploaded file. Derive the list from the parsed data (e.g. `[...new Set(contacts.map(c => c[companyColumnKey]))].sort()`). When the user has not typed anything, show all unique company names; when the user types in the input, **filter** the options to those that match the search (e.g. "Coca" → show "Coca-Cola Company", "Coca Cola Ltd", etc.).
-- **User selects one**: The user **selects one company name** from the list (e.g. click an option or choose from the dropdown). The selected value is used as the target for AI Search.
-- **AI Search button**: When a company is selected, show an **"AI Search"** button (e.g. next to the company select or in the toolbar). When the user clicks it: (1) send `uniqueCompanyNames` and a synthetic user message (e.g. "Find everyone that works at [selected company]") to the backend; (2) show loading state (e.g. LMA spinner); (3) on response, filter the local contact list by `matchingCompanyNames` and display the result in the **second tab (AI Results)**. Disable the button when no company is selected or when a request is in flight.
-- **When data changes**: When a new file is loaded, repopulate the select list from the new file’s unique company names and clear or reset the current selection and AI Results if needed.
-
-### 2c. Hover over company name: display entity
-
-- **Tooltip on hover**: When the user **hovers over a company name** (in the Contacts table, the AI Results table, or optionally in the company select list), show a **tooltip** (e.g. MUI `Tooltip`) with:
-  - **Title line**: The exact company name from the cell followed by `" company name."` — e.g. **"Coca-Cola Europacific company name."**
-  - **Body**: The **Entity** (canonical/parent company, e.g. "Coca-Cola") — e.g. "Entity: Coca-Cola".
-- **Data source**: **Entity** column in the import file — canonical company or label per row. No Description column; tooltip uses Entity only.
-- **Where to show**: Apply the tooltip to the **Company** cell in both the Contacts tab and the AI Results tab (and optionally to options in the company search/select dropdown). If the data has no entity for a given name, show no tooltip or a minimal fallback.
-
-### 3. Performant list for 25,000 contacts (no pagination)
-
-- **Do not paginate**: Show all 25,000 rows in one scrollable view. Do **not** split into pages (e.g. "Page 1 of 500").
-- **Virtualization**: Use a **virtualized list** (windowing) so only visible rows (plus a small overscan) are rendered. Options:
-  - **@tanstack/react-virtual** (recommended): Wrap the table body in a virtualizer; each row has a fixed or dynamic height; only visible rows are in the DOM. Headers stay fixed; body scrolls.
-  - **react-window**: Similar idea; `VariableSizeList` or `FixedSizeList` for the table body.
-- **Table structure**: Keep a normal table for headers (`<thead>`) and use the virtualizer for the body (`<tbody>`): render only the visible slice of rows (e.g. rows 0–30 out of 25,000), so the list stays performant while the user scrolls through the full file.
-
-### 4. Parsing (unchanged)
-
-- **CSV**: `Papa.parse(file, { header: true, skipEmptyLines: true })` → array of objects.
-- **Excel**: `XLSX.read(file, { type: 'array' })` → first sheet → `XLSX.utils.sheet_to_json(sheet, { defval: '' })` → same shape.
-- **Column detection**: Detect company column (e.g. "Company", "Organization"); use detected key for later AI Search/filter. If no company column, show an error and optionally still show the table with a warning.
-
-### Summary
-
-| Item | Spec |
-|------|------|
-| Entry point | "Upload file" button |
-| Drop zone | Shown when user opens upload (modal or panel); accept CSV/Excel only |
-| After drop | Parse file, close drop zone, show contents in **Contacts** tab |
-| **Tabs** | **Tab 1 — Contacts**: full file contents (virtualized table). **Tab 2 — AI Results**: output of AI Search (all matching contacts). No chat. |
-| Table | Both tabs use same table format; virtualized body for large row counts |
-| Row count | 25,000 in Contacts; AI Results shows only matching rows (e.g. 1,000). **No pagination**; use **virtualized list** (e.g. @tanstack/react-virtual) for performance. |
-| **Search + select** | **Input box** to search company names; **select list** dynamically populated with all unique company names; user **selects one** company. |
-| **AI Search** | **Button** "AI Search" shown when a company is selected. On click: call backend with selected company as query; show results in **Tab 2 (AI Results)**. Loading spinner during request. No chat UI. |
-| **Company hover** | **Hover over company name**: tooltip title is **"[Company name] company name."**; body is **Entity** (e.g. "Entity: Coca-Cola"). Entity column only; no Description in import. |
+- Backend batches large company-name lists (e.g. 400 per batch). The first batch may use an agent loop with an optional web-search tool; remaining batches use a single LLM call. Results are merged and sanitized (only names from the request are returned).
 
 ---
 
-## Implementation steps
+## 2. Tech stack and repo layout
 
-### 1. Scaffold React app
+**Monorepo**
 
-- Create project with `npm create vite@latest` (React + TypeScript or JavaScript).
-- Install: `papaparse`, `xlsx`, `react-dropzone`, **MUI** (`@mui/material`, `@emotion/react`, `@emotion/styled`), and **testing**: `vitest`, `@testing-library/react`, `@testing-library/jest-dom`, `jsdom`; **Storybook** (`@storybook/react-vite`, `@storybook/addon-essentials`); **Playwright** (`@playwright/test`). Add npm scripts: `test`, `storybook`, `test:e2e` (see Step 9).
+- Root contains `client/` and `server/`.
 
-### 2. File drop zone
+**Client**
 
-- One visible drop zone (e.g. dashed border, "Drop CSV or Excel here"). Use `react-dropzone` with `accept` for `.csv` and `.xlsx`. On `onDropAccepted`: take the first file, pass to parser.
+- React 19, Vite 7, TypeScript.
+- MUI (Material-UI) 7, Emotion (react + styled).
+- react-dropzone, papaparse, xlsx.
+- @tanstack/react-virtual for the table body (virtualized list).
+- **Do not add ag-grid.** The table is implemented with MUI + @tanstack/react-virtual only.
 
-### 3. Parsing layer
+**Server**
 
-- **CSV**: `Papa.parse(file, { header: true, skipEmptyLines: true })` → `data` array of objects.
-- **Excel**: `XLSX.read(file, { type: 'array' })` → first sheet → `XLSX.utils.sheet_to_json(sheet, { defval: '' })` → same structure.
-- Normalize so both paths produce `Array<Record<string, string>>`. **Column detection**: Identify the company column (e.g. header named "Company", "Organization", or configurable); if missing, show a clear error and do not allow AI Search until resolved.
+- Node (ESM), Express, cors, dotenv, openai SDK. Default port 3001.
 
-### 4. State and table UI
+**Testing**
 
-- State: e.g. `contacts`, `error`, `fileName`. If `contacts`: render a table with virtualization or pagination for 25k rows. Do not send `contacts` to the backend — only derive and send unique company names when the user clicks AI Search. Optional: empty state when no file yet; "Clear" or "Upload another" to reset.
-
-### 5. Sample contact file (for demo) — new file replaces old
-
-- **Scale**: **25,000 contacts** total across **25 companies** (1,000 contacts per company). One company is **Coke** (1,000 rows); the other **24 companies** each have 1,000 rows with the same naming convention (varied official names + **misspellings + typos** per company).
-- **Columns**: Name, Email, Company (and optionally Phone, Region).
-- **Per-company convention**: For each of the 25 companies, define a curated list of **official and variant names** plus **misspellings and typos** (e.g. "Coca Cola Compnay", "Colgate-Palmoliv", "Costco Wholsale"). Generation script assigns 1,000 rows per company by sampling from that company's name list.
-- **List of 25 companies**: The script uses a defined list of 25 parent companies. **15 of the 25** must **start with "C"** (Coke + 14 others, e.g. Colgate, Costco, Cadbury, Caterpillar, Comcast, Chevron, Chrysler, Citigroup, Cisco, Campbell's, Conagra, Cardinal Health, Cigna, CVS). The other **10** do not start with C (e.g. PepsiCo, Unilever, Amazon, Microsoft, Apple, Walmart, etc.). **Create a new demo file** that replaces the previous one; output path e.g. `client/public/demo-contacts-25k.csv`.
-- **15 "C" companies**: So that searching for **Coke** (or any C company) is non-trivial, **15 of the 25 companies** have names starting with "C". Each has 1,000 rows with its own variants, **misspellings, and typos**. The LLM will see many C-starting and often typo-heavy company names and must return only the ones matching the user's selected company.
-- **Misspellings and typos**: Every company's variant list must include **intentional typos and misspellings** (dropped letters, transposed letters, phonetic errors). This increases the size and noise of the unique company list and better demonstrates the LLM's matching ability.
-- **Entity for hover**: To support **hover tooltip** (see §2c), include an **"Entity"** column (canonical company per row). Tooltip title is "[Company name] company name."; body is "Entity: [entity]". No Description column in the import.
-- **Output**: Single CSV (and optionally .xlsx). Same file is used to run the demo for **any of the 25 companies**. Regenerating produces the **new** file (15 C companies, typos throughout), replacing the old demo file.
-
-### 6. Backend (Node + Express)
-
-- Route: `POST /api/chat` — body `{ messages, uniqueCompanyNames: string[] }`. Do not accept or store contact rows (PII).
-- **Validation**: Reject invalid payloads (non-array, missing fields) with 400. Use a schema (e.g. Zod, Joi). Optionally cap total length (e.g. 10,000–20,000) to bound cost; otherwise rely on **batching**.
-- **Batching**: If there are many unique company names, split into batches (e.g. 300–500 per batch). For each batch: build prompt with that chunk and the user message; call the LLM with **structured output** and a **timeout** (e.g. 30–60s per call). Merge and deduplicate results, then sanitize (only names from the request). Process batches sequentially (or limited concurrency). Return a single response.
-- **Prompt and LLM**: Use structured output (e.g. OpenAI JSON mode). Set a timeout on each LLM call.
-- **Response sanitization**: After parsing the LLM response, **filter** `matchingCompanyNames` so it only includes names that appear in the request's `uniqueCompanyNames`. Return `{ matchingCompanyNames: string[], explanation?: string }`; on parse failure, return 502 or 503 with a generic message.
-- **Error handling**: Map LLM 429/5xx and timeouts to appropriate HTTP status and safe error messages. Never log or expose PII.
-- Env: `OPENAI_API_KEY` via `dotenv`. CORS restricted to frontend origin (env var in production). Document in `.env.example`.
-
-### 7. AI Search button and Results tab (React) — no chat
-
-- **AI Search button**: Shown next to (or near) the company search/select when a company is selected. On click: compute `uniqueCompanyNames` from the current `contacts`; build a single user message (e.g. "Find everyone that works at [selected company]"); send `{ messages: [{ role: 'user', content: thatMessage }], uniqueCompanyNames }` to the backend. Never send the contact list. If no file is loaded or no company column or no company selected, disable the button.
-- **Loading and errors**: Disable the AI Search button and show loading state (e.g. **LMA-themed loading spinner**) while the request is in flight. On network error, timeout, or 4xx/5xx, show a user-friendly error and allow retry.
-- **Results tab**: When response returns `matchingCompanyNames`, **normalize** when filtering (e.g. trim company names before compare). Filter the **local** `contacts` where Company (normalized) is in `matchingCompanyNames`. Display **all matching contacts in the second tab (AI Results)**. Optionally show count and/or explanation in that tab. **No chat window** — only the button and the Results tab.
-
-### 8. UI and theming (MUI, dark/light, accent)
-
-- **MUI**: Use Material-UI for layout, components (AppBar, Paper, TextField, Button, Table, etc.). Wrap the app in `ThemeProvider` and optionally `CssBaseline`.
-- **Sky blue (LMA-style) accent**: Set the primary palette to **Sky 400/600** (e.g. `#38BDF8` dark, `#0284c7` light). Use for primary buttons, links, selected state, and key accents. See [PLAN-Styling.md](PLAN-Styling.md) for design tokens.
-- **Dark and light mode**: Implement a **theme mode toggle** (e.g. in the app bar). Use MUI's `createTheme` with `palette.mode: 'light' | 'dark'`; store the user's choice in `localStorage` and restore on load.
-- **LMA-themed loading spinner**: Loading spinner themed after **LMA** (Legal Marketing Association). Use LMA brand palette: Primary blue `#3F47AA`, White `#FFFFFF`, optional lavender `#C2BADF`. Use during: (1) file upload/parsing, (2) AI Search/LLM request in flight.
-
-### 9. Test suite (Vitest, Storybook, Playwright)
-
-- **Vitest**: Client tests in `client/__tests__/` (parseFile, filter logic, components). Server tests in `server/__tests__/` (validation, sanitization, batching, errors). Mock `fetch` for AI Search; mock LLM for backend.
-- **Storybook**: `.storybook/main.ts`, `.storybook/preview.tsx` with MUI ThemeProvider and light/dark. One story per component: DropZone, ContactsTable, AI Search button / Results tab, LMASpinner.
-- **Playwright**: `playwright.config.ts` in client root. E2E: (1) Upload CSV, assert table in Contacts tab; (2) Select a company (e.g. Coke), click AI Search, assert results in second tab (AI Results). Scripts: `test:e2e`, `test:e2e:ui`.
-
-## File structure (suggested)
-
-Single repo (monorepo): root contains `client/` and `server/`.
-
-- **client/** — Vite React app: `src/` (App, theme, components, utils), `__tests__/`, `.storybook/`, `e2e/`, `playwright.config.ts`, `public/` or `data/` for sample CSV, `scripts/generate-contacts.js`, `package.json`.
-- **server/** — Express app: `index.js`, `__tests__/`, `.env.example`, `package.json`.
-
-## Production and robustness
-
-- **Security**: Input validation (request body schema); response sanitization (only return company names that were in the request); no PII in logs; CORS restricted; API key only in server env; optional rate limiting.
-- **Batch processing**: When `uniqueCompanyNames` is large, batch (e.g. 300–500 per batch), call LLM per batch, merge and sanitize, return one response. Process sequentially or with limited concurrency.
-- **Reliability**: LLM timeout (e.g. 30–60s); structured output (JSON mode); error handling for 429, 5xx, timeouts; frontend loading and retry.
-- **API contract**: Request `{ messages, uniqueCompanyNames }`; Response `{ matchingCompanyNames, explanation? }`; errors `{ error, code? }`. **Large lists**: Backend uses batch processing; optional high cap (e.g. 10k–20k names) to bound cost; no 400 solely for large lists.
-- **Data and parsing**: Use the **detected column key** (not hardcoded "Company") when deriving `uniqueCompanyNames` and when filtering. Normalize when filtering (e.g. trim). Handle empty/invalid file.
-- **Testing**: Full suite — Vitest (unit/integration), Storybook (component docs), Playwright (E2E). See File structure and Step 9.
-
-## Out of scope
-
-- Google Sheets API (only file upload from exports). Editing or deleting contact rows (display only). Streaming LLM responses. Sending any PII to the backend or LLM. User authentication (single-user or demo deployment).
-
-## Delivered UX (demo)
-
-1. Professional MUI UI with sky blue accent and dark/light mode toggle.
-2. User opens app → sees upload and (after file load) Contacts tab + company search + AI Search button.
-3. User drags and drops the contact file → Contacts tab loads (25k rows, 25 companies). PII stays in the browser.
-4. User searches/selects a company (e.g. Coke), clicks **AI Search** → frontend sends only unique company names and query → LLM returns which names match → frontend filters locally and displays the matching contacts in **Tab 2 (AI Results)**. Same demo can be run for all 25 companies.
+- Vitest (unit/component), Storybook (React-Vite), Playwright (E2E, Chromium). All test configs live in the client (vite.config.ts, playwright.config.ts, .storybook/).
 
 ---
 
-## Implementation status (living document)
+## 3. Setup and run instructions
 
-Update this section as you build so the next person or LLM knows what is done and what is next.
+**Prerequisites**
 
-- **Done**: Plan fixed (typo "large lists" → period). Repo scaffold; client (Vite React, MUI, upload, drop zone, virtualized table, company select); server (`POST /api/chat`, validation, batching, OpenAI, sanitization). **Plan updates implemented**: (1) **Chat removed** — no chat tab or ChatWindow; (2) **AI Search** button when company selected; (3) **Tab 2 = AI Results** — shows matching contacts from last AI Search (empty state until first search); (4) **Contact generator** — 15 companies starting with C, 10 non-C, typos/misspellings, **Entity** column (no Description); output `client/public/demo-contacts-25k.csv`; (5) **Company name hover** — tooltip title "[Company name] company name.", body "Entity: [entity]"; applied in Contacts and AI Results tables; (6) **parseFile** — `detectEntityColumnKey`, `entityColumnKey` returned from `parseContactFile`. **Description removed from import**; **Description column on results** — AI Results table (and any results export) includes an extra **Description** column, filled from a client-side mapping (`companyDescriptions.ts`) keyed by company name. (7) **Export results** — "Export results" button on AI Results tab downloads CSV (including Description) with filename sanitization, UTF-8 BOM, formula-injection mitigation, and error Alert on failure (`exportCsv.ts`). (8) **Styling polish** — theme `shape.borderRadius: 8`; AppBar border and toolbar padding; top bar in Paper with background; Tabs minHeight and primary indicator; AI Results header row (count + Export button), info cards with borderRadius, spacing before table; ContactsTable Paper borderRadius and header/cell padding; empty state padding.
-- **Done (agentic)**: (9) **Visible reasoning** — backend returns `reasoningSteps`; frontend shows "How the agent matched" section. (10) **Web search tool** — backend mock `search_web` + agent loop on first batch; returns `toolCalls`; frontend shows "Agent looked up". (11) **Follow-up refinement** — backend accepts `previousMatchingNames` and multi-message; frontend Refine input + button; validation (max messages, message length, previousMatchingNames subset). See [PLAN-AGENTIC.md](PLAN-AGENTIC.md).
-- **Next**: Optional: Storybook stories for AI Search flow; E2E test for Export results / download assertion.
+- Node.js 18+, npm or pnpm.
+
+**Client**
+
+```bash
+cd client
+npm install
+npm run dev
+```
+
+- Dev server at http://localhost:5173. Vite proxies `/api` to http://localhost:3001.
+
+**Server**
+
+```bash
+cd server
+cp .env.example .env
+```
+
+- Edit `.env`: set `OPENAI_API_KEY`, `CORS_ORIGIN` (e.g. http://localhost:5173), `PORT` (e.g. 3001).
+- Then: `npm install && npm run dev`.
+
+**Env (server)**
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| OPENAI_API_KEY | Yes | OpenAI API key |
+| CORS_ORIGIN | Yes | Frontend origin (e.g. http://localhost:5173) |
+| PORT | No | Server port (default 3001) |
+| MAX_AGENT_ITERATIONS | No | Max tool-use rounds per request (default 3) |
+| TAVILY_API_KEY | No | Optional; if not set, mock search is used |
+
+**NPM scripts**
+
+- **Client**: dev, build, test, test:run, test:coverage, storybook, test:e2e, generate-contacts, lint, preview.
+- **Server**: dev, start, test.
+
+---
+
+## 4. File structure
+
+```
+client/
+  src/
+    main.tsx
+    App.tsx
+    theme.ts
+    index.css
+    components/     # UploadDropZone, CompanySelect, ContactsTable, LMASpinner
+    utils/          # parseFile.ts, exportCsv.ts, companyDescriptions.ts
+    api/            # chat.ts
+    data/           # crmCompanies.ts (optional)
+    test/           # setup.ts, utils.tsx, fixtures.ts
+  e2e/
+    upload-and-ai-search.spec.ts
+    smoke.spec.ts
+    fixtures/
+      sample-contacts.csv
+  scripts/
+    generate-contacts.js
+  .storybook/
+    main.ts
+  public/
+  vite.config.ts
+  playwright.config.ts
+  eslint.config.js
+  package.json
+
+server/
+  index.js
+  .env.example
+  package.json
+```
+
+**Key files**
+
+- **Client**: App.tsx (main UI and state), theme.ts (MUI theme), parseFile.ts, exportCsv.ts, chat.ts, UploadDropZone, CompanySelect, ContactsTable, LMASpinner. Optional: companyDescriptions.ts (exists for future use; current app does not wire it into the UI or export).
+- **Server**: index.js (single entry; POST /api/chat, GET /health).
+
+---
+
+## 5. Core data and parsing (client)
+
+**ContactRow**
+
+- Type: `Record<string, string>`. Headers = keys from the first row.
+
+**CSV**
+
+- `Papa.parse(file, { header: true, skipEmptyLines: true })`. Headers from `result.meta?.fields` or `Object.keys(data[0])`. Data = array of objects.
+
+**Excel**
+
+- `XLSX.read(file, { type: 'array' })`, first sheet, `XLSX.utils.sheet_to_json(sheet, { defval: '' })`. Same shape as CSV.
+
+**Column detection**
+
+- **Company column**: First header in this list that exists: `['Company', 'company', 'Organization', 'organization', 'Employer', 'employer']`. Return the key or null.
+- **Entity column**: First header in this list that exists: `['Entity', 'entity', 'Company Entity', 'company entity', 'Canonical Company', 'canonical company']`. Return the key or null.
+
+**parseContactFile(file)**
+
+- If `file.name` ends with `.xlsx`, use Excel path; else use CSV. Return `{ data, headers, companyColumnKey, entityColumnKey }`. If no company column, UI still shows the table but AI Search is disabled.
+
+---
+
+## 6. Styling and theme (client)
+
+**MUI**
+
+- Wrap app in ThemeProvider and CssBaseline. Theme from `getAppTheme(mode: 'light' | 'dark')`.
+
+**Design tokens**
+
+- Slate: 50 #F8FAFC, 400 #94A3B8, 500 #64748B, 600 #475569, 700 #334155, 800 #1E293B, 900 #0F172A.
+- Primary: Sky 400 #38BDF8 (dark mode), Sky 600 #0284c7 (light mode).
+- ACCENT_TINT rgba(56,189,248,0.1), ACCENT_BORDER rgba(56,189,248,0.3).
+- PURPLE #A855F7, EMERALD #10B981, ROSE #F43F5E.
+- Fonts: body `"Inter", sans-serif`; heading `"Space Grotesk", "Inter", sans-serif`.
+
+**Theme**
+
+- shape.borderRadius 8. Palette: primary (Sky 400/600), secondary (SLATE_600), background/text/divider for light and dark. divider = SLATE_700.
+
+**Component overrides**
+
+- MuiCssBaseline: body fontFamily; `*:focus-visible` outline 2px primary.
+- MuiAppBar: backgroundColor SLATE_900, borderBottom SLATE_700, color SLATE_50.
+- MuiButton / MuiIconButton: focus-visible outline; containedPrimary uses primary main and contrast.
+- MuiTab: minHeight 48, no textTransform; focus-visible outline.
+- MuiTabs: minHeight 48, indicator primary, height 3.
+- MuiPaper: dark mode background SLATE_800, border SLATE_700.
+- MuiAlert: standardInfo/Success/Error left border 4px.
+- MuiChip colorPrimary: ACCENT_TINT bg, ACCENT_BORDER border.
+
+**Theme persistence**
+
+- localStorage key `themeMode` ('light' | 'dark'). Toggle in AppBar; restore on load.
+
+**LMASpinner**
+
+- LMA-style CircularProgress (e.g. blue #3F47AA). Used during upload/parse and during AI Search loading state.
+
+---
+
+## 7. Main UI and flows (client)
+
+**Entry (no file loaded)**
+
+- Empty state: "Get started", short description, "Upload file" button (data-testid: upload-trigger). Click opens UploadDropZone (dialog with dropzone). Accept .csv and .xlsx only.
+
+**After upload**
+
+- Toolbar: fileName, row count, company column key (or "No company column"). CompanySelect (autocomplete; options = unique company names from contacts; data-testid: company-select-input). "AI Search" button (data-testid: ai-search-button); disabled when no company selected or when loading.
+
+**Tabs**
+
+- Tab 1: **Contacts** (data-testid: tab-contacts). Full import list. "Export list" button (data-testid: export-import-list-button). Virtualized ContactsTable.
+- Tab 2: **AI Results** (data-testid: tab-ai-results). Empty state until first AI Search: "Select a company and click AI Search to see matching contacts here." After search: count ("N contacts matching your search"), optional "How the agent matched" accordion (reasoningSteps), "List entries matched to parent company" accordion with checkboxes to exclude names, "Set company name for all results" text field + Apply, "Export results" button (data-testid: export-results-button), "Remove records from Import List" button (data-testid: remove-from-import-button), virtualized table.
+
+**ContactsTable**
+
+- Virtualized (@tanstack/react-virtual), sortable by column (TableSortLabel per header). Headers from props. Row height 48. For header "Parent company", use wider min width (e.g. minmax(240px, 1fr)).
+- **Tooltips**: Only the **"Parent company"** column gets a Tooltip: when the header is "Parent company" and the cell has a value, show a Tooltip with the **cell value** (same as the cell content). No tooltip on the Company column; no "[Company name] company name." or "Entity: ..." in the current app.
+
+**AI Results table**
+
+- Same ContactsTable. Headers = **original upload headers + 'Parent company' only** (no Description column). Rows = displayed result rows; each row has 'Parent company' = inferredParentCompany from the API, and optionally the Company column overridden by "Set company name for all results" when applied. Export uses the same headers and rows (no Description column). The module companyDescriptions.ts exists but is not used in the current app; do not wire it into headers or export for an identical rebuild.
+
+**Client and Refine**
+
+- The **client** sends exactly **one** user message per AI Search: `postChat([{ role: 'user', content: `Find everyone that works at ${company}` }], uniqueCompanyNames)`. There is **no** Refine input or button; no previousMatchingNames or originalCompany sent. The server may still accept those fields for API completeness.
+
+**Remove records from Import List**
+
+- Button removes the currently displayed AI result rows from the contacts state and switches to the Contacts tab. Row count in Contacts decreases accordingly; AI Results tab still shows the same result set when switched back (persisted in state).
+
+**LLM search dialog**
+
+- While `aiSearchLoading` is true, show a modal dialog (data-testid: llm-search-dialog): title "LLM searching..." with a small CircularProgress. Body: a log area showing lines from processLogLines. Initial line: "LLM: Starting...". Then append lines at ~700 ms interval: "LLM: Connecting...", "LLM: Sending company list (N names)...", "LLM: Identifying parent company...", "LLM: Looking up subsidiaries and brands...", "LLM: Matching subsidiaries and variants to your list...", "LLM: Checking misspellings and name variants...", "LLM: Validating matches...", "LLM: Preparing response...", "LLM: Finalizing results...". On success append "LLM: Complete."; on error append "LLM: Error — {message}". The log area has a **shimmer animation** (CSS keyframes, gradient overlay, e.g. 2.5s ease-in-out infinite). Below the log, show warning text: **"This data is being computed by an LLM. It may be inaccurate or incomplete. Please check before using."**
+
+---
+
+## 8. API contract (server)
+
+**Route**
+
+- POST /api/chat
+
+**Request body**
+
+- `messages`: array of `{ role: 'user' | 'assistant', content: string }`. Max 10 messages; each content max 2000 chars. Must have at least one user message with non-empty content.
+- `uniqueCompanyNames`: array of strings (required). Trimmed non-empty strings used.
+- `previousMatchingNames`: optional array; must be subset of uniqueCompanyNames (used for refinement).
+- `originalCompany`: optional string (used for refinement).
+
+**Response (200)**
+
+- `matchingCompanyNames`: string[] (only names that appear in the request's uniqueCompanyNames).
+- `explanation`: optional string.
+- `parentCompany`: optional string | null (inferred parent).
+- `reasoningSteps`: optional array of `{ title: string, detail: string }`.
+
+**Errors**
+
+- 400: validation (e.g. messages not array, no user message, uniqueCompanyNames not array).
+- 413: body too large (express.json limit 2MB).
+- 429: rate limit.
+- 503: OPENAI_API_KEY missing.
+- 500: generic. CORS from env; express.json({ limit: 2 * 1024 * 1024 }).
+
+---
+
+## 9. Server logic (backend)
+
+**Validation (validateBody)**
+
+- Reject if body missing or not object. Require messages (array, length ≤ 10, each content ≤ 2000), uniqueCompanyNames (array). Last user message must have non-empty content. Build nameSet from uniqueCompanyNames (trimmed strings). If previousMatchingNames present, filter to names in nameSet. Return { ok: true, messages, uniqueCompanyNames (filtered), lastUserContent, previousMatchingNames, isRefinement, originalCompany } or { ok: false, error }.
+
+**Batching**
+
+- Split uniqueCompanyNames into chunks of 400 (BATCH_SIZE). Process first batch with runAgentLoop (with search_web tool); process remaining batches with askLLM (no tools). Merge matchingCompanyNames from all batches; sanitize so every returned name is in the request's uniqueCompanyNames set (use canonical casing from request). After merge, call addParentSuffixVariants(nameList, parentCompany, allMatches) to add any list entry that is parent or parent + legal suffix (Inc, Corp, Ltd, Co, LLC, etc.). Return single response with merged matchingCompanyNames, one explanation, one reasoningSteps (e.g. from first batch that returns them).
+
+**LLM (askLLM)**
+
+- Model: gpt-4o-mini. response_format: { type: 'json_object' }. System prompt: infer parentCompany (official legal name), list subsidiariesAndBrands/inferredBrands, then match from the list only—output matchingCompanyNames (exact copies from list), explanation, reasoningSteps. Legal suffixes: Inc., Inc, Corp., Corp, Ltd., Ltd, Co., Co, LLC, Limited, Computer (use for getCoreCompanyName and addParentSuffixVariants so parent+Corp/Ltd/Inc from the list are always included even if LLM omits them).
+
+**Agent (runAgentLoop, first batch only)**
+
+- Same system prompt plus: you may call search_web with a query like "[Parent company] subsidiaries and brands". Tool: name search_web, parameter query (string). Mock implementation can return a fixed string; optional TAVILY_API_KEY for real search. MAX_AGENT_ITERATIONS = 3. When model returns JSON (no more tool calls), parse and return same shape as askLLM.
+
+**parseLLMJson**
+
+- Strip optional markdown code block (```json ... ```); JSON.parse. Extract parentCompany, matchingCompanyNames (or matching_names), explanation, reasoningSteps, inferredBrands.
+
+**Health**
+
+- GET /health returns 200 JSON { ok: true }.
+
+---
+
+## 10. Client API (chat.ts)
+
+**postChat(messages, uniqueCompanyNames, previousMatchingNames?, originalCompany?)**
+
+- POST to `${API_BASE}/api/chat` (API_BASE = import.meta.env.VITE_API_URL ?? ''). Body: { messages, uniqueCompanyNames }; if previousMatchingNames/originalCompany provided, include them. Content-Type application/json. Return response JSON as Promise<ChatResponse>. ChatResponse: matchingCompanyNames, parentCompany?, explanation?, reasoningSteps?.
+- **Current app usage**: The app calls postChat with **two arguments only**: messages (array with one user message) and uniqueCompanyNames. The function may still accept optional third and fourth arguments for server API compatibility.
+
+---
+
+## 11. Export (client)
+
+**sanitizeFilenameSegment(segment)**
+
+- Remove path chars and control chars; collapse spaces; trim; cap length 200. If result empty or Windows-reserved (CON, PRN, AUX, NUL, COM1–9, LPT1–9), return 'search'.
+
+**toCsvString(data, headers)**
+
+- Build CSV from ContactRow[] and headers. For each cell, if value starts with =, +, -, @, tab, or CR, prefix with tab (formula-injection mitigation). Use Papa.unparse with columns: headers.
+
+**downloadCsv(data, headers, filename)**
+
+- Prepend UTF-8 BOM (\uFEFF) to CSV string; create Blob; createObjectURL; programmatic anchor click with download=filename; revokeObjectURL. Export results filename: ai-results-{sanitizeFilenameSegment(company)}-{date}.csv. Export import list: {sanitizeFilenameSegment(fileNameWithoutExt)}-{date}.csv.
+
+---
+
+## 12. Demo data generator
+
+**Script**
+
+- client/scripts/generate-contacts.js (ESM). Output: client/public/demo-contacts-25k.csv. Use path and fs; __dirname via path.dirname(fileURLToPath(import.meta.url)).
+
+**Spec**
+
+- 25 companies, 1,000 contacts each (25,000 rows). **Columns: Name, Email, Company, Phone only** (no Entity column). 15 companies start with "C": Coke, Colgate, Costco, Cadbury, Caterpillar, Comcast, Chevron, Chrysler, Citigroup, Cisco, Campbell's, Conagra, Cardinal Health, Cigna, CVS. 10 non-C: PepsiCo, Unilever, Amazon, Microsoft, Apple, Walmart, Target, Ford, Disney, Netflix. Each company has 8–20 name variants including typos/misspellings; assign each row a company name by sampling from that company's variant list. Generate names/emails/phones (e.g. first name, last name, email from template, phone placeholder). Write CSV with header row then data rows; escape cells that contain comma, quote, or newline.
+
+**Run**
+
+- From client: `npm run generate-contacts`.
+
+---
+
+## 13. Testing — unit and component (Vitest)
+
+**Config (vite.config.ts)**
+
+- test.globals true, environment 'jsdom', setupFiles './src/test/setup.ts', include 'src/**/*.{test,spec}.{ts,tsx}', exclude e2e and node_modules. coverage provider v8, reporter text and html, include src/**/*.{ts,tsx}, exclude src/test, **/*.stories.*, e2e.
+
+**Setup (src/test/setup.ts)**
+
+- Import '@testing-library/jest-dom/vitest'.
+
+**Render helper (src/test/utils.tsx)**
+
+- Custom render that wraps UI in ThemeProvider with getAppTheme('light') and CssBaseline. Re-export everything from @testing-library/react; export custom render as render. Use type-only import for ReactElement if verbatimModuleSyntax is enabled.
+
+**Fixtures (src/test/fixtures.ts)**
+
+- mockContacts: array of ContactRow (e.g. 3 rows with Name, Email, Company). mockHeaders: ['Name', 'Email', 'Company'].
+
+**Tests**
+
+- parseFile: detectCompanyColumnKey, detectEntityColumnKey, parseCSV, parseContactFile (file type dispatch, column keys).
+- exportCsv: sanitizeFilenameSegment, toCsvString, downloadCsv (mock URL.createObjectURL/revokeObjectURL).
+- api/chat: postChat with mocked fetch; assert request body and response shape.
+- CompanySelect, UploadDropZone, ContactsTable: smoke and key behavior. For CompanySelect options use getByRole('option', { name: '...' }).
+
+---
+
+## 14. Testing — Storybook
+
+**Config (.storybook/main.ts)**
+
+- stories '../src/**/*.stories.@(js|jsx|ts|tsx)', addons addon-essentials and blocks, framework @storybook/react-vite. Preview should use MUI theme (e.g. decorator with ThemeProvider).
+
+**Stories**
+
+- One per component: UploadDropZone, CompanySelect, ContactsTable, LMASpinner. Use Meta and StoryObj; args for props; document that preview wraps with theme.
+
+---
+
+## 15. Testing — E2E (Playwright)
+
+**Config (playwright.config.ts)**
+
+- testDir 'e2e', project chromium (Desktop Chrome), baseURL from PLAYWRIGHT_BASE_URL or http://localhost:5173, webServer command 'npm run dev', url http://localhost:5173, reuseExistingServer when not CI. fullyParallel true, forbidOnly in CI, retries 2 in CI.
+
+**Fixtures**
+
+- e2e/fixtures/sample-contacts.csv: CSV with header Name, Email, Company and 3 rows (e.g. 2x Acme Inc, 1x Globex Corp). In specs, resolve path with ESM __dirname: `const __dirname = path.dirname(fileURLToPath(import.meta.url))`; fixture path `path.join(__dirname, 'fixtures', 'sample-contacts.csv')`.
+
+**Mock response**
+
+- For route **/api/chat**, fulfill with JSON: { matchingCompanyNames: ['Acme Inc'], parentCompany: 'Acme Corp', reasoningSteps: [] }. With sample-contacts (2 Acme Inc, 1 Globex), AI Results will show 2 contacts matching; "Remove records from Import List" removes those 2 from the contact list so Contacts tab shows 1 row.
+
+**Specs**
+
+1. **Smoke**: goto '/'; expect title to match /List-O-Matic 2000/; expect element with data-testid main-content visible; expect data-testid upload-trigger visible.
+2. **Upload + AI Search**: click upload-trigger; setInputFiles to fixture; expect main-content to contain fileName and "3 rows"; click company-select-input; click getByRole('option', { name: 'Acme Inc' }); route /api/chat with mock; click ai-search-button; click tab "AI Results"; expect "contacts matching your search" and export-results-button visible.
+3. **Contacts Export list**: after upload, expect tab-contacts and export-import-list-button visible with text "Export list".
+4. **Remove records**: after AI Search and 2 results, click remove-from-import-button; expect tab Contacts and "1 row"; switch to AI Results; expect "2 contacts matching" and export-results-button still visible.
+5. **LLM dialog**: during AI Search, expect dialog (data-testid llm-search-dialog) visible with text matching "computed by an LLM" and "may be inaccurate".
+
+**data-testid list**
+
+- upload-trigger, main-content, company-select-input, ai-search-button, tab-contacts, tab-ai-results, export-results-button, export-import-list-button, remove-from-import-button, llm-search-dialog.
+
+---
+
+## 16. Security and robustness
+
+**Server**
+
+- No PII in logs. Sanitize response matchingCompanyNames to the request's set only. CORS origin from env. Body size limit. Map 429 and timeouts to appropriate status. Catch entity.too.large (413).
+
+**Client**
+
+- Formula-injection mitigation on export (tab prefix for cells starting with =, +, -, @, tab, CR). Filename sanitization. Never send contact rows or PII in API payload.
+
+---
+
+## 17. Out of scope
+
+- Google Sheets import; user authentication; streaming LLM responses; sending any PII to the server; editing or deleting individual contact rows (only the "Remove records from Import List" bulk action is in scope).
