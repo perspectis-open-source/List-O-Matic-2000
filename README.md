@@ -31,9 +31,11 @@ npm run dev
 
 ### 3. Run tests
 
-- **Unit/integration (Vitest)**: `cd client && npm run test`; `cd server && npm run test`
-- **Storybook**: `cd client && npm run storybook`
-- **E2E (Playwright)**: `cd client && npm run test:e2e` (ensure client and server are running or use mock)
+- **Unit tests (Vitest)**: `cd client && npm run test` (watch) or `npm run test:run` (single run). Coverage: `npm run test:coverage`.
+- **Component tests**: Same Vitest run; tests live next to components (`*.test.tsx`) and in `src/utils/*.test.ts`, `src/api/*.test.ts`. Use `src/test/utils.tsx` for theme-wrapped render.
+- **Storybook**: `cd client && npm run storybook` (port 6006). Stories in `src/**/*.stories.tsx`; preview uses the app MUI theme.
+- **E2E (Playwright)**: `cd client && npm run test:e2e`. E2E mocks `POST /api/chat` via `page.route()` so the backend is not required. Tests and fixtures in `client/e2e/`. Set `PLAYWRIGHT_BASE_URL` when running against a deployed app.
+- **Server**: `cd server && npm run test` (if present).
 
 ## Repo layout
 

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
+import { useState, useCallback, useMemo, useRef } from 'react'
 import {
   ThemeProvider,
   CssBaseline,
@@ -36,18 +36,12 @@ import DownloadIcon from '@mui/icons-material/Download'
 import { getAppTheme } from './theme'
 import { parseContactFile, type ContactRow } from './utils/parseFile'
 import { downloadCsv, sanitizeFilenameSegment } from './utils/exportCsv'
-import { postMatchCompanies } from './api/matchCompanies'
 import { UploadDropZone } from './components/UploadDropZone'
 import { ContactsTable } from './components/ContactsTable'
 import { CompanySelect } from './components/CompanySelect'
-import { CrmCompanyList } from './components/CrmCompanyList'
-import { DemoSlide } from './components/DemoSlide'
-import { SLIDES } from './slides'
-import { postChat, type ReasoningStep, type ToolCall } from './api/chat'
+import { postChat, type ReasoningStep } from './api/chat'
 
 type TabValue = 'contacts' | 'aiResults'
-type FeatureTab = 'contactSearch' | 'contactMatch'
-type ContactMatchTabValue = 'companies' | 'contactList'
 
 const logShimmer = keyframes`
   0% { background-position: 200% 0; }
@@ -74,22 +68,8 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
   const [aiSearchError, setAiSearchError] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   const [reasoningSteps, setReasoningSteps] = useState<ReasoningStep[] | null>(null)
-  const [toolCalls, setToolCalls] = useState<ToolCall[] | null>(null)
   const [processLogLines, setProcessLogLines] = useState<string[]>([])
   const processLogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const [featureTab, setFeatureTab] = useState<FeatureTab>('contactSearch')
-  const [contactMatchTab, setContactMatchTab] = useState<ContactMatchTabValue>('companies')
-  const [crmCompaniesList, setCrmCompaniesList] = useState<string[]>([])
-  const [crmUploadOpen, setCrmUploadOpen] = useState(false)
-  const [crmParseError, setCrmParseError] = useState<string | null>(null)
-  const [contactListData, setContactListData] = useState<ContactRow[]>([])
-  const [contactListHeaders, setContactListHeaders] = useState<string[]>([])
-  const [contactListFileName, setContactListFileName] = useState<string | null>(null)
-  const [contactListCompanyKey, setContactListCompanyKey] = useState<string | null>(null)
-  const [contactListEntityKey, setContactListEntityKey] = useState<string | null>(null)
-  const [contactListUploadOpen, setContactListUploadOpen] = useState(false)
-  const [contactListParseError, setContactListParseError] = useState<string | null>(null)
-  const [contactListUpdating, setContactListUpdating] = useState(false)
 
   const handleFileAccepted = useCallback(async (file: File) => {
     setParseError(null)
@@ -99,7 +79,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     setAiSearchError(null)
     setExportError(null)
     setReasoningSteps(null)
-    setToolCalls(null)
     setOverrideCompanyName(null)
     setCompanyNameOverrideInput('')
     try {
@@ -118,72 +97,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
       setFileName(null)
     }
   }, [])
-
-  const handleCrmCompaniesFileAccepted = useCallback(async (file: File) => {
-    setCrmParseError(null)
-    try {
-      const { data, headers, companyColumnKey } = await parseContactFile(file)
-      const key = companyColumnKey || (headers[0] ?? '')
-      if (!key) {
-        setCrmParseError('No company column found. Use a CSV/Excel with a "Company" column or a first column of names.')
-        return
-      }
-      const set = new Set<string>()
-      for (const row of data) {
-        const v = row[key]
-        if (v != null && String(v).trim() !== '') set.add(String(v).trim())
-      }
-      setCrmCompaniesList(Array.from(set))
-      setCrmUploadOpen(false)
-    } catch (e) {
-      setCrmParseError(e instanceof Error ? e.message : 'Failed to parse file')
-    }
-  }, [])
-
-  const handleContactListFileAccepted = useCallback(async (file: File) => {
-    setContactListParseError(null)
-    try {
-      const { data, headers: h, companyColumnKey: key, entityColumnKey: entityKey } = await parseContactFile(file)
-      setContactListData(data)
-      setContactListHeaders(h)
-      setContactListFileName(file.name)
-      setContactListCompanyKey(key)
-      setContactListEntityKey(entityKey)
-      setContactListUploadOpen(false)
-    } catch (e) {
-      setContactListParseError(e instanceof Error ? e.message : 'Failed to parse file')
-    }
-  }, [])
-
-  const MATCH_BATCH_SIZE = 200
-
-  const handleUpdateContactCompanies = useCallback(async () => {
-    const key = contactListCompanyKey
-    if (!key || crmCompaniesList.length === 0 || contactListData.length === 0) return
-    setContactListParseError(null)
-    setContactListUpdating(true)
-    try {
-      // Only company name strings from the Company column — no PII (names, emails, phones) sent to LLM
-      const uniqueNames = Array.from(new Set(contactListData.map((row) => String(row[key] ?? '').trim()).filter(Boolean)))
-      const fullMapping: Record<string, string> = {}
-      for (let i = 0; i < uniqueNames.length; i += MATCH_BATCH_SIZE) {
-        const chunk = uniqueNames.slice(i, i + MATCH_BATCH_SIZE)
-        // Sends only company name strings: chunk + CRM company names. No contact list, no PII.
-        const { mapping } = await postMatchCompanies(chunk, crmCompaniesList)
-        Object.assign(fullMapping, mapping)
-      }
-      const updated = contactListData.map((row) => {
-        const current = String(row[key] ?? '').trim()
-        const matched = current ? (fullMapping[current] ?? current) : current
-        return { ...row, [key]: matched }
-      })
-      setContactListData(updated)
-    } catch (e) {
-      setContactListParseError(e instanceof Error ? e.message : 'Failed to update company names')
-    } finally {
-      setContactListUpdating(false)
-    }
-  }, [contactListCompanyKey, crmCompaniesList, contactListData])
 
   const uniqueCompanyNames = useMemo(() => {
     if (!companyColumnKey || !contacts.length) return []
@@ -227,7 +140,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     setAiSearchError(null)
 
     setReasoningSteps(null)
-    setToolCalls(null)
     setInferredParentCompany(null)
     setOverrideCompanyName(null)
     setCompanyNameOverrideInput('')
@@ -266,7 +178,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
       setExcludedMatchNames([])
       setInferredParentCompany(res.parentCompany ?? null)
       setReasoningSteps(res.reasoningSteps ?? null)
-      setToolCalls(res.toolCalls ?? null)
       setActiveTab('aiResults')
       setTimeout(() => setAiSearchLoading(false), 1200)
     } catch (e) {
@@ -280,7 +191,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
       setExcludedMatchNames([])
       setInferredParentCompany(null)
       setReasoningSteps(null)
-      setToolCalls(null)
       setTimeout(() => setAiSearchLoading(false), 2000)
     }
   }, [effectiveCompany, companyColumnKey, uniqueCompanyNames, aiSearchLoading])
@@ -303,20 +213,10 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', width: '100%' }}>
       <AppBar position="static" elevation={0} sx={{ width: '100%', borderBottom: 1, borderColor: 'divider' }}>
         <Toolbar sx={{ width: '100%', maxWidth: '100%', px: { xs: 2, sm: 3 }, gap: 2, flexWrap: 'wrap' }}>
-          <Typography variant="h6" component="div" sx={{ mr: 2 }}>
-            Marketing Demo — Contact List + AI
+          <Typography variant="h6" component="div" sx={{ flex: 1 }}>
+            List-O-Matic 2000
           </Typography>
-          <Tabs
-            value={featureTab}
-            onChange={(_, v: FeatureTab) => setFeatureTab(v)}
-            textColor="inherit"
-            indicatorColor="inherit"
-            sx={{ minHeight: 40, flex: 1, minWidth: 0, '& .MuiTab-root': { color: 'inherit', minHeight: 48, opacity: 0.9 }, '& .Mui-selected': { color: 'primary.main', fontWeight: 600, opacity: 1 }, '& .MuiTabs-indicator': { backgroundColor: 'primary.main' }, '& .MuiTabs-flexContainer': { gap: 0 } }}
-          >
-            <Tab label="Contact search" value="contactSearch" />
-            <Tab label="Contact match" value="contactMatch" />
-          </Tabs>
-          <IconButton color="inherit" onClick={onToggleMode} aria-label="Toggle theme" sx={{ ml: 'auto' }}>
+          <IconButton color="inherit" onClick={onToggleMode} aria-label="Toggle theme">
             {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
           </IconButton>
         </Toolbar>
@@ -326,16 +226,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
         open={uploadOpen}
         onClose={() => setUploadOpen(false)}
         onFileAccepted={handleFileAccepted}
-      />
-      <UploadDropZone
-        open={crmUploadOpen}
-        onClose={() => { setCrmUploadOpen(false); setCrmParseError(null) }}
-        onFileAccepted={handleCrmCompaniesFileAccepted}
-      />
-      <UploadDropZone
-        open={contactListUploadOpen}
-        onClose={() => { setContactListUploadOpen(false); setContactListParseError(null) }}
-        onFileAccepted={handleContactListFileAccepted}
       />
 
       <Dialog open={aiSearchLoading} disableEscapeKeyDown maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 2 } }}>
@@ -383,104 +273,23 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
               ))
             )}
           </Box>
+          <Typography
+            variant="body2"
+            sx={{ mt: 2, color: 'error.main', fontWeight: 500 }}
+          >
+            This data is being computed by an LLM. It may be inaccurate or incomplete. Please check before using.
+          </Typography>
         </DialogContent>
       </Dialog>
 
-      <Container maxWidth="xl" sx={{ flex: 1, display: 'flex', flexDirection: 'column', py: 2, minHeight: 0, overflow: 'auto', position: 'relative' }}>
-        {featureTab === 'contactMatch' && (
-          <Box>
-            <Tabs value={contactMatchTab} onChange={(_, v: ContactMatchTabValue) => setContactMatchTab(v)} sx={{ mb: 2, minHeight: 48 }} textColor="primary" indicatorColor="primary">
-              <Tab label="Companies" value="companies" />
-              <Tab label="Contact list" value="contactList" />
-            </Tabs>
-            {contactMatchTab === 'companies' && (
-              <>
-                {crmParseError && (
-                  <Alert severity="error" onClose={() => setCrmParseError(null)} sx={{ mb: 2 }}>
-                    {crmParseError}
-                  </Alert>
-                )}
-                <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                    <Button variant="contained" startIcon={<UploadFileIcon />} onClick={() => setCrmUploadOpen(true)}>
-                      Upload companies
-                    </Button>
-                    <Typography variant="body2" color="text.secondary">
-                      CSV or Excel with a &quot;Company&quot; column (or first column). Replaces the list below.
-                    </Typography>
-                  </Box>
-                </Paper>
-                {crmCompaniesList.length === 0 ? (
-                  <Paper variant="outlined" sx={{ p: 4, borderRadius: 2, textAlign: 'center' }}>
-                    <Typography variant="body1" color="text.secondary">
-                      No companies yet. Upload a CSV or Excel file above (e.g. the 500 companies template).
-                    </Typography>
-                  </Paper>
-                ) : (
-                  <CrmCompanyList companies={crmCompaniesList} maxHeight={520} />
-                )}
-              </>
-            )}
-            {contactMatchTab === 'contactList' && (
-              <>
-                {contactListParseError && (
-                  <Alert severity="error" onClose={() => setContactListParseError(null)} sx={{ mb: 2 }}>
-                    {contactListParseError}
-                  </Alert>
-                )}
-                <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                    <Button variant="contained" startIcon={<UploadFileIcon />} onClick={() => setContactListUploadOpen(true)}>
-                      Upload contact list
-                    </Button>
-                    <Button
-                      variant="contained"
-                      color="primary"
-                      disabled={crmCompaniesList.length === 0 || contactListData.length === 0 || !contactListCompanyKey || contactListUpdating}
-                      startIcon={contactListUpdating ? <CircularProgress size={18} color="inherit" /> : undefined}
-                      onClick={handleUpdateContactCompanies}
-                    >
-                      {contactListUpdating ? 'Updating…' : 'Update company names from CRM'}
-                    </Button>
-                    {contactListFileName && (
-                      <Typography variant="body2" color="text.secondary">
-                        {contactListFileName} — {contactListData.length.toLocaleString()} rows
-                      </Typography>
-                    )}
-                  </Box>
-                  {contactListData.length > 0 && crmCompaniesList.length > 0 && (
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                      Match each contact&apos;s company to the CRM list and replace with the CRM company name.
-                    </Typography>
-                  )}
-                </Paper>
-                {contactListData.length === 0 ? (
-                  <Paper variant="outlined" sx={{ p: 4, borderRadius: 2, textAlign: 'center' }}>
-                    <Typography variant="body1" color="text.secondary">
-                      No contacts yet. Upload a CSV or Excel file with contacts (Name, Email, Company, etc.).
-                    </Typography>
-                  </Paper>
-                ) : (
-                  <ContactsTable
-                    contacts={contactListData}
-                    headers={contactListHeaders}
-                    maxHeight={520}
-                    companyColumnKey={contactListCompanyKey}
-                    entityColumnKey={contactListEntityKey}
-                  />
-                )}
-              </>
-            )}
-          </Box>
-        )}
-
-        {featureTab === 'contactSearch' && parseError && (
+      <Container maxWidth="xl" sx={{ flex: 1, display: 'flex', flexDirection: 'column', py: 2, minHeight: 0, overflow: 'auto', position: 'relative' }} data-testid="main-content">
+        {parseError && (
           <Alert severity="error" onClose={() => setParseError(null)} sx={{ mb: 2 }}>
             {parseError}
           </Alert>
         )}
 
-        {featureTab === 'contactSearch' && !hasFile && (
+        {!hasFile && (
           <Box
             sx={{
               position: 'fixed',
@@ -520,17 +329,15 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                 startIcon={<UploadFileIcon />}
                 onClick={() => setUploadOpen(true)}
                 sx={{ minWidth: 160 }}
+                data-testid="upload-trigger"
               >
                 Upload file
               </Button>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 3, display: 'block' }}>
-                Demo file: <code style={{ fontSize: '0.85em' }}>/demo-contacts-25k.csv</code> in the app&apos;s public folder (25,000 contacts, 25 companies).
-              </Typography>
             </Paper>
           </Box>
         )}
 
-        {featureTab === 'contactSearch' && hasFile && (
+        {hasFile && (
           <>
             <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 2, bgcolor: 'background.default' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
@@ -551,6 +358,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                   startIcon={aiSearchLoading ? <CircularProgress size={18} color="inherit" /> : <SearchIcon />}
                   onClick={handleAiSearch}
                   disabled={!effectiveCompany || !companyColumnKey || aiSearchLoading}
+                  data-testid="ai-search-button"
                 >
                   AI Search
                 </Button>
@@ -563,9 +371,9 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
               </Alert>
             )}
 
-            <Tabs value={activeTab} onChange={(_, v: TabValue) => setActiveTab(v)} sx={{ mb: 2, minHeight: 48 }} textColor="primary" indicatorColor="primary">
-              <Tab label="Contacts" value="contacts" />
-              <Tab label="AI Results" value="aiResults" />
+            <Tabs value={activeTab} onChange={(_, v: TabValue) => setActiveTab(v)} sx={{ mb: 2, minHeight: 48 }} textColor="primary" indicatorColor="primary" data-testid="tabs-contacts-ai">
+              <Tab label="Contacts" value="contacts" data-testid="tab-contacts" />
+              <Tab label="AI Results" value="aiResults" data-testid="tab-ai-results" />
             </Tabs>
 
             {activeTab === 'contacts' && (
@@ -591,27 +399,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                     <Typography variant="subtitle2" color="primary" sx={{ mb: 2 }}>
                       {aiResultsContacts.length.toLocaleString()} contacts matching your search.
                     </Typography>
-                    {toolCalls != null && toolCalls.length > 0 && (
-                      <Accordion defaultExpanded={false} sx={{ mb: 2, borderRadius: 2, '&:before': { display: 'none' }, border: 1, borderColor: 'divider' }}>
-                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                          <Typography variant="subtitle2" color="primary">
-                            Agent looked up
-                          </Typography>
-                        </AccordionSummary>
-                        <AccordionDetails sx={{ pt: 0 }}>
-                          <List dense disablePadding>
-                            {toolCalls.map((tc, i) => (
-                              <ListItem key={i} sx={{ py: 0.25, display: 'block' }}>
-                                <Typography variant="body2" component="span">
-                                  Searched: &quot;{tc.query ?? '—'}&quot;
-                                  {tc.summary ? ` — ${tc.summary}` : ''}
-                                </Typography>
-                              </ListItem>
-                            ))}
-                          </List>
-                        </AccordionDetails>
-                      </Accordion>
-                    )}
                     {reasoningSteps != null && reasoningSteps.length > 0 && (
                       <Accordion defaultExpanded={false} sx={{ mb: 2, borderRadius: 2, '&:before': { display: 'none' }, border: 1, borderColor: 'divider' }}>
                         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -645,7 +432,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                       </AccordionSummary>
                       <AccordionDetails sx={{ pt: 0 }}>
                         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                          {matchingCompanyNames.length} string(s) from your upload that the LLM matched to the parent company. These are not company names—they are the bad data (variants, misspellings, brand names as entered) that will be normalized to the parent.
+                          {matchingCompanyNames.length} string(s) from your upload that the LLM matched to the parent company. These are not company names—they are the imported data (variants, misspellings, brand names as entered) that will be normalized to the parent.
                         </Typography>
                         <List dense sx={{ maxHeight: 200, overflowY: 'scroll' }}>
                           {(() => {
@@ -706,6 +493,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                           size="small"
                           startIcon={<DownloadIcon />}
                           onClick={handleExportResults}
+                          data-testid="export-results-button"
                         >
                           Export results
                         </Button>
@@ -741,8 +529,6 @@ export default function App() {
     const stored = localStorage.getItem('themeMode') as 'light' | 'dark' | null
     return stored ?? 'light'
   })
-  const [slideIndex, setSlideIndex] = useState<number | 'demo'>(0)
-  const [exiting, setExiting] = useState(false)
   const theme = useMemo(() => getAppTheme(mode), [mode])
   const onToggleMode = useCallback(() => {
     const next = mode === 'light' ? 'dark' : 'light'
@@ -750,49 +536,11 @@ export default function App() {
     localStorage.setItem('themeMode', next)
   }, [mode])
 
-  const slideTransitionRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => () => {
-    if (slideTransitionRef.current) clearTimeout(slideTransitionRef.current)
-  }, [])
-
-  const onSlideNext = useCallback(() => {
-    if (slideIndex === 'demo') return
-    if (slideTransitionRef.current) clearTimeout(slideTransitionRef.current)
-    setExiting(true)
-    const duration = 280
-    slideTransitionRef.current = setTimeout(() => {
-      slideTransitionRef.current = null
-      setSlideIndex((prev) => {
-        if (prev === 'demo') return prev
-        if (typeof prev === 'number' && prev >= SLIDES.length - 1) return 'demo'
-        return typeof prev === 'number' ? prev + 1 : 0
-      })
-      setExiting(false)
-    }, duration)
-  }, [slideIndex])
-
-  const showSlides = slideIndex !== 'demo' && SLIDES.length > 0 && SLIDES[slideIndex] != null
-  const showDemo = slideIndex === 'demo' || SLIDES.length === 0
-
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Box
-        sx={{
-          opacity: exiting ? 0 : 1,
-          transition: 'opacity 0.28s ease',
-          width: '100%',
-          minHeight: '100vh',
-        }}
-      >
-        {showSlides && (
-          <DemoSlide
-            html={SLIDES[slideIndex as number]}
-            isLastSlide={slideIndex === SLIDES.length - 1}
-            onNext={onSlideNext}
-          />
-        )}
-        {showDemo && <AppContent mode={mode} onToggleMode={onToggleMode} />}
+      <Box sx={{ width: '100%', minHeight: '100vh' }}>
+        <AppContent mode={mode} onToggleMode={onToggleMode} />
       </Box>
     </ThemeProvider>
   )

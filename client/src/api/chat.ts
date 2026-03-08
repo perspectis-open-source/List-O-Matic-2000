@@ -3,14 +3,12 @@ const API_BASE = import.meta.env.VITE_API_URL ?? ''
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
 export type ReasoningStep = { title: string; detail: string }
-export type ToolCall = { tool: string; query?: string; summary?: string }
 
 export type ChatResponse = {
   matchingCompanyNames: string[]
   parentCompany?: string | null
   explanation?: string
   reasoningSteps?: ReasoningStep[]
-  toolCalls?: ToolCall[]
 }
 
 export async function postChat(

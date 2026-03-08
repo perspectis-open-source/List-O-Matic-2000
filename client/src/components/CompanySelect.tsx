@@ -61,6 +61,7 @@ export function CompanySelect({
           placeholder="Type to search company names..."
           size="small"
           disabled={disabled}
+          inputProps={{ ...params.inputProps, 'data-testid': 'company-select-input' }}
         />
       )}
       disabled={disabled}
