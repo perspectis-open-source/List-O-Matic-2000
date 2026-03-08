@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react'
 import { CompanySelect } from './CompanySelect'
-import { mockContacts, mockHeaders } from '../test/fixtures'
+import { mockContacts } from '../test/fixtures'
 
 const meta: Meta<typeof CompanySelect> = {
   component: CompanySelect,

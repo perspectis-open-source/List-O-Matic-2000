@@ -20,7 +20,7 @@ function compare(a: string, b: string, dir: 'asc' | 'desc'): number {
   return dir === 'asc' ? out : -out
 }
 
-export function ContactsTable({ contacts, headers, maxHeight = 500, companyColumnKey, entityColumnKey }: Props) {
+export function ContactsTable({ contacts, headers, maxHeight = 500 }: Props) {
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null)
 
   const sortedContacts = useMemo(() => {

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { screen, fireEvent } from '@testing-library/react'
 import { render } from '../test/utils'
 import { CompanySelect } from './CompanySelect'
-import { mockContacts, mockHeaders } from '../test/fixtures'
+import { mockContacts } from '../test/fixtures'
 
 describe('CompanySelect', () => {
   it('returns null when companyColumnKey is null', () => {

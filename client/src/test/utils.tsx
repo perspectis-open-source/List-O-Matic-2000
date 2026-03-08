@@ -1,4 +1,4 @@
-import { ReactElement } from 'react'
+import type { ReactElement } from 'react'
 import { render, type RenderOptions } from '@testing-library/react'
 import { ThemeProvider, CssBaseline } from '@mui/material'
 import { getAppTheme } from '../theme'
