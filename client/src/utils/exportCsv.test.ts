@@ -1,3 +1,8 @@
+/**
+ * @file exportCsv.test.ts
+ * @description Vitest unit tests for exportCsv helpers (sanitizeFilenameSegment, toCsvString, downloadCsv).
+ * @module List-O-Matic-2000/client
+ */
 import { describe, it, expect, vi } from 'vitest'
 import { sanitizeFilenameSegment, toCsvString, downloadCsv } from './exportCsv'
 import type { ContactRow } from './parseFile'

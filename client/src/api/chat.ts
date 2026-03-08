@@ -1,3 +1,8 @@
+/**
+ * @file chat.ts
+ * @description Client API: postChat() to send messages and uniqueCompanyNames; returns matchingCompanyNames and optional reasoning.
+ * @module List-O-Matic-2000/client
+ */
 const API_BASE = import.meta.env.VITE_API_URL ?? ''
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }

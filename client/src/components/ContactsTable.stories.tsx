@@ -1,3 +1,8 @@
+/**
+ * @file ContactsTable.stories.tsx
+ * @description Storybook stories for ContactsTable component.
+ * @module List-O-Matic-2000/client
+ */
 import type { Meta, StoryObj } from '@storybook/react'
 import { ContactsTable } from './ContactsTable'
 import { mockContacts, mockHeaders } from '../test/fixtures'

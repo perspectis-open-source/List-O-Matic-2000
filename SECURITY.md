@@ -13,7 +13,7 @@ We release patches for security vulnerabilities for the current stable release.
 If you discover a security vulnerability, please report it responsibly:
 
 1. **Do not** open a public issue.
-2. Email the maintainers with a description of the vulnerability and steps to reproduce (if possible). You can find maintainer contact in the repository description or by opening a normal issue and asking for a private channel.
+2. You can report via the GitHub **Security** tab → **Report a vulnerability** for this repository, or email the maintainers with a description of the vulnerability and steps to reproduce (if possible). You can find maintainer contact in the repository description or by opening a normal issue and asking for a private channel.
 3. We will acknowledge your report and work on a fix. We may ask for more details.
 4. After a fix is released, we can credit you in the release notes (if you wish).
 

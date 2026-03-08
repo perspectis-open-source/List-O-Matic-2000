@@ -4,7 +4,7 @@
 
 - [Quick start](#quick-start) · [Tests](#run-tests) · [Contributing](./CONTRIBUTING.md) · [Code of Conduct](./CODE_OF_CONDUCT.md) · [License](./LICENSE)
 
-See **[PLAN.md](./PLAN.md)** for the full build plan and spec.
+See **[PLAN.md](./PLAN.md)** for the full build plan and spec. See **[ROADMAP.md](./ROADMAP.md)** for what we're doing next (phases, releases, community).
 
 ## Quick start
 
@@ -43,7 +43,7 @@ npm run dev
 
 ## Repo layout
 
-- **client/** — React (Vite), MUI, drag-and-drop upload, table, chat window. Parsing and filtering in the browser; only unique company names sent to the API.
+- **client/** — React (Vite), MUI, drag-and-drop upload, table, company select, AI Search button, AI Results tab. Parsing and filtering in the browser; only unique company names sent to the API.
 - **server/** — Express; `POST /api/chat` accepts `{ messages, uniqueCompanyNames }`, calls LLM, returns `{ matchingCompanyNames, explanation? }`. API key in env only.
 - **PLAN.md** — Full specification and implementation steps (Steps 1–9). Use as the single source of truth when building or handing off.
 
@@ -55,7 +55,7 @@ A 25,000-row demo CSV is generated and saved at **`client/public/demo-contacts-2
 cd client && npm run generate-contacts
 ```
 
-Then upload that file in the app (or open the app and use "Upload file" to select it). The file has 25 companies (1,000 contacts each), including Coke and 5–6 other companies whose names start with "C" (Colgate, Costco, Cadbury, etc.) for the Coke-search demo.
+Then upload that file in the app (or open the app and use "Upload file" to select it). The file has 25 companies (1,000 contacts each), with 15 companies whose names start with "C" (including Coke, Colgate, Costco, Cadbury, etc.) for the Coke-search demo.
 
 ## Env (server)
 

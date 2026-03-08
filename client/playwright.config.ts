@@ -1,3 +1,8 @@
+/**
+ * @file playwright.config.ts
+ * @description Playwright E2E config: e2e dir, chromium, dev server, base URL.
+ * @module List-O-Matic-2000/client
+ */
 import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({

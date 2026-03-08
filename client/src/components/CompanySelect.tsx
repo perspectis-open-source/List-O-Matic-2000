@@ -1,3 +1,8 @@
+/**
+ * @file CompanySelect.tsx
+ * @description Autocomplete to search and select a company from unique names in the contact list.
+ * @module List-O-Matic-2000/client
+ */
 import { useMemo, useState } from 'react'
 import { Autocomplete, TextField } from '@mui/material'
 import type { ContactRow } from '../utils/parseFile'

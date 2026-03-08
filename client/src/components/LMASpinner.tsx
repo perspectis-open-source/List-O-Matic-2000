@@ -1,7 +1,12 @@
+/**
+ * @file LMASpinner.tsx
+ * @description LMA-themed loading spinner for upload and AI Search states.
+ * @module List-O-Matic-2000/client
+ */
 import { Box, CircularProgress } from '@mui/material'
 
-const LMA_BLUE = '#3F47AA'
-const LMA_CHARCOAL = '#4D4A4F'
+const L_O_M_2000_BLUE = '#3F47AA'
+const L_O_M_2000_CHARCOAL = '#4D4A4F'
 
 export function LMASpinner() {
   return (
@@ -10,7 +15,7 @@ export function LMASpinner() {
         size={28}
         thickness={4}
         sx={{
-          color: LMA_BLUE,
+          color: L_O_M_2000_BLUE,
           '& .MuiCircularProgress-circle': {
             strokeLinecap: 'round',
           },
@@ -23,7 +28,7 @@ export function LMASpinner() {
           fontWeight: 700,
           fontSize: '0.75rem',
           letterSpacing: 0.5,
-          color: LMA_CHARCOAL,
+          color: L_O_M_2000_CHARCOAL,
         }}
       >
         List-O-Matic 2000

@@ -1,6 +1,7 @@
 /**
- * System list of 500 companies as would be extracted from a CRM.
- * Not imported by the user — these sit in the system.
+ * @file crmCompanies.ts
+ * @description System list of 500 companies (CRM-style); not user-imported.
+ * @module List-O-Matic-2000/client
  */
 
 const SEED_COMPANIES = [

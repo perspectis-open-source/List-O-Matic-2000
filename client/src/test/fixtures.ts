@@ -1,3 +1,8 @@
+/**
+ * @file fixtures.ts
+ * @description Shared test fixtures: mockContacts, mockHeaders for component and API tests.
+ * @module List-O-Matic-2000/client
+ */
 import type { ContactRow } from '../utils/parseFile'
 
 export const mockContacts: ContactRow[] = [

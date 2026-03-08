@@ -1,3 +1,8 @@
+/**
+ * @file smoke.spec.ts
+ * @description Playwright E2E smoke: app loads, title and main content visible.
+ * @module List-O-Matic-2000/client/e2e
+ */
 import { test, expect } from '@playwright/test'
 
 test.describe('Smoke', () => {

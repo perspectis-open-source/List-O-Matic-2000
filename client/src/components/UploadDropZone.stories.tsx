@@ -1,3 +1,8 @@
+/**
+ * @file UploadDropZone.stories.tsx
+ * @description Storybook stories for UploadDropZone component.
+ * @module List-O-Matic-2000/client
+ */
 import type { Meta, StoryObj } from '@storybook/react'
 import { UploadDropZone } from './UploadDropZone'
 

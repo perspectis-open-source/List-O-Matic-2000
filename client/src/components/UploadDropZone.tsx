@@ -1,3 +1,8 @@
+/**
+ * @file UploadDropZone.tsx
+ * @description Dialog with drop zone for CSV/Excel contact file upload.
+ * @module List-O-Matic-2000/client
+ */
 import { useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { Dialog, DialogTitle, DialogContent, Typography, Box } from '@mui/material'

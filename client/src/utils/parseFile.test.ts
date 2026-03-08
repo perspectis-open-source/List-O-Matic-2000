@@ -1,3 +1,8 @@
+/**
+ * @file parseFile.test.ts
+ * @description Vitest unit tests for parseFile (column detection, parseCSV, parseContactFile).
+ * @module List-O-Matic-2000/client
+ */
 import { describe, it, expect } from 'vitest'
 import {
   detectCompanyColumnKey,

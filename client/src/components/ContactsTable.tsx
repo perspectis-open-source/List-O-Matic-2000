@@ -1,3 +1,8 @@
+/**
+ * @file ContactsTable.tsx
+ * @description Virtualized, sortable table for contact rows with optional Parent company column and tooltips.
+ * @module List-O-Matic-2000/client
+ */
 import { useRef, Fragment, useState, useMemo, useCallback } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Paper, Box, TableSortLabel, Tooltip, Typography } from '@mui/material'

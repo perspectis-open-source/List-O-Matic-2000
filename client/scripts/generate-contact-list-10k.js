@@ -1,8 +1,7 @@
 /**
- * Generates a 10,000-row contact list CSV.
- * Company names are based on the CRM 500 companies but with slight misspellings/variations
- * so they do NOT exactly match the CRM list (for testing matching logic).
- * Output: client/public/contact-list-10k.csv
+ * @file generate-contact-list-10k.js
+ * @description Generates a 10,000-row contact list CSV with varied company names for testing. Output: client/public/contact-list-10k.csv.
+ * @module List-O-Matic-2000/client/scripts
  */
 import fs from 'fs'
 import path from 'path'

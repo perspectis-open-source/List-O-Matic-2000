@@ -1,3 +1,8 @@
+/**
+ * @file theme.ts
+ * @description MUI theme (dark/light, slate + sky blue accent) and exported design tokens.
+ * @module List-O-Matic-2000/client
+ */
 import { createTheme, type PaletteMode } from '@mui/material/styles'
 
 // Design tokens from slides (single source of truth)

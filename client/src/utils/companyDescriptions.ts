@@ -1,7 +1,7 @@
 /**
- * Maps company name (as it appears in the data) to optional description text.
- * Used to add a Description column to the AI Results table/export only.
- * Extend this map for more companies or variants.
+ * @file companyDescriptions.ts
+ * @description Maps company name (as in data) to optional description text for AI Results table/export. Extend for more companies.
+ * @module List-O-Matic-2000/client
  */
 const DESCRIPTIONS: Record<string, string> = {
   'Coca-Cola Europacific':

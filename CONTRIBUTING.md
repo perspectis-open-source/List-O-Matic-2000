@@ -6,7 +6,7 @@ Thanks for your interest in contributing. Here’s how to get started.
 
 1. **Clone the repo**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/List-O-Matic-2000.git
+   git clone https://github.com/perspectis-open-source/List-O-Matic-2000.git
    cd List-O-Matic-2000
    ```
 

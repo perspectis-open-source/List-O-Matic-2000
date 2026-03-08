@@ -1,3 +1,8 @@
+/**
+ * @file upload-and-ai-search.spec.ts
+ * @description Playwright E2E: upload CSV, AI Search with mocked API, export, remove records, persisted results.
+ * @module List-O-Matic-2000/client/e2e
+ */
 import { test, expect } from '@playwright/test'
 import path from 'path'
 

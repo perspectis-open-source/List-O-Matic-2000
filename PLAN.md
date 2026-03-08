@@ -9,6 +9,8 @@ overview: "Marketing-demo app: upload a contact list (with varied company names,
 
 This plan is intended for **another person or an LLM** to build the application. Use it as the single source of truth.
 
+**→ For what to do *next* (roadmap, phases, releases), see [ROADMAP.md](./ROADMAP.md).**
+
 - **Read the full plan first** to understand the demo goal, constraints (no PII to LLM, batching), and architecture.
 - **Build in order**: Follow **Implementation steps 1–9** in sequence. Each step references tech choices, file structure, and (where relevant) the Production and robustness section.
 - **File structure**: Create the folders and files under **File structure (suggested)**. Keep client and server in one repo (monorepo) unless you prefer separate repos.
@@ -197,7 +199,7 @@ Use this as the spec for the upload and file-display UI.
 ### 8. UI and theming (MUI, dark/light, accent)
 
 - **MUI**: Use Material-UI for layout, components (AppBar, Paper, TextField, Button, Table, etc.). Wrap the app in `ThemeProvider` and optionally `CssBaseline`.
-- **Bright green accent**: Set the primary palette color to a **bright green** (e.g. `#00e676`, `#00c853`). Use for primary buttons, links, selected state, and key accents.
+- **Sky blue (LMA-style) accent**: Set the primary palette to **Sky 400/600** (e.g. `#38BDF8` dark, `#0284c7` light). Use for primary buttons, links, selected state, and key accents. See [PLAN-Styling.md](PLAN-Styling.md) for design tokens.
 - **Dark and light mode**: Implement a **theme mode toggle** (e.g. in the app bar). Use MUI's `createTheme` with `palette.mode: 'light' | 'dark'`; store the user's choice in `localStorage` and restore on load.
 - **LMA-themed loading spinner**: Loading spinner themed after **LMA** (Legal Marketing Association). Use LMA brand palette: Primary blue `#3F47AA`, White `#FFFFFF`, optional lavender `#C2BADF`. Use during: (1) file upload/parsing, (2) AI Search/LLM request in flight.
 
@@ -229,7 +231,7 @@ Single repo (monorepo): root contains `client/` and `server/`.
 
 ## Delivered UX (demo)
 
-1. Professional MUI UI with bright green accent and dark/light mode toggle.
+1. Professional MUI UI with sky blue accent and dark/light mode toggle.
 2. User opens app → sees upload and (after file load) Contacts tab + company search + AI Search button.
 3. User drags and drops the contact file → Contacts tab loads (25k rows, 25 companies). PII stays in the browser.
 4. User searches/selects a company (e.g. Coke), clicks **AI Search** → frontend sends only unique company names and query → LLM returns which names match → frontend filters locally and displays the matching contacts in **Tab 2 (AI Results)**. Same demo can be run for all 25 companies.
@@ -242,4 +244,4 @@ Update this section as you build so the next person or LLM knows what is done an
 
 - **Done**: Plan fixed (typo "large lists" → period). Repo scaffold; client (Vite React, MUI, upload, drop zone, virtualized table, company select); server (`POST /api/chat`, validation, batching, OpenAI, sanitization). **Plan updates implemented**: (1) **Chat removed** — no chat tab or ChatWindow; (2) **AI Search** button when company selected; (3) **Tab 2 = AI Results** — shows matching contacts from last AI Search (empty state until first search); (4) **Contact generator** — 15 companies starting with C, 10 non-C, typos/misspellings, **Entity** column (no Description); output `client/public/demo-contacts-25k.csv`; (5) **Company name hover** — tooltip title "[Company name] company name.", body "Entity: [entity]"; applied in Contacts and AI Results tables; (6) **parseFile** — `detectEntityColumnKey`, `entityColumnKey` returned from `parseContactFile`. **Description removed from import**; **Description column on results** — AI Results table (and any results export) includes an extra **Description** column, filled from a client-side mapping (`companyDescriptions.ts`) keyed by company name. (7) **Export results** — "Export results" button on AI Results tab downloads CSV (including Description) with filename sanitization, UTF-8 BOM, formula-injection mitigation, and error Alert on failure (`exportCsv.ts`). (8) **Styling polish** — theme `shape.borderRadius: 8`; AppBar border and toolbar padding; top bar in Paper with background; Tabs minHeight and primary indicator; AI Results header row (count + Export button), info cards with borderRadius, spacing before table; ContactsTable Paper borderRadius and header/cell padding; empty state padding.
 - **Done (agentic)**: (9) **Visible reasoning** — backend returns `reasoningSteps`; frontend shows "How the agent matched" section. (10) **Web search tool** — backend mock `search_web` + agent loop on first batch; returns `toolCalls`; frontend shows "Agent looked up". (11) **Follow-up refinement** — backend accepts `previousMatchingNames` and multi-message; frontend Refine input + button; validation (max messages, message length, previousMatchingNames subset). See [PLAN-AGENTIC.md](PLAN-AGENTIC.md).
-- **Next**: Optional: Storybook stories for AI Search flow; E2E test for select company → AI Search → Export results → assert download. Update tests that referenced ChatWindow.
+- **Next**: Optional: Storybook stories for AI Search flow; E2E test for Export results / download assertion.

@@ -1,3 +1,8 @@
+/**
+ * @file chat.test.ts
+ * @description Vitest unit tests for postChat API client.
+ * @module List-O-Matic-2000/client
+ */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { postChat } from './chat'
 

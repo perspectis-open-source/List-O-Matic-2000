@@ -1,9 +1,7 @@
 /**
- * Generates a 25,000-row demo contact CSV.
- * 25 companies × 1,000 contacts. 15 companies start with "C"; 10 do not.
- * Includes typos/misspellings in company names.
- * Output: client/public/demo-contacts-25k.csv
- * Columns: Name, Email, Company, Phone
+ * @file generate-contacts.js
+ * @description Generates a 25,000-row demo contact CSV (25 companies × 1,000 contacts; 15 start with "C"). Output: client/public/demo-contacts-25k.csv.
+ * @module List-O-Matic-2000/client/scripts
  */
 import fs from 'fs'
 import path from 'path'

@@ -1,3 +1,8 @@
+/**
+ * @file vite.config.ts
+ * @description Vite + Vitest config: React plugin, /api proxy, jsdom, coverage, test setup.
+ * @module List-O-Matic-2000/client
+ */
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 

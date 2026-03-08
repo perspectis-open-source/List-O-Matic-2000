@@ -1,5 +1,6 @@
 /**
- * Marketing Demo API: POST /api/chat
+ * @file index.js
+ * @description Marketing Demo API: POST /api/chat — LLM-backed company name matching; no PII.
  *
  * Logic:
  * 1. Take the input company name (from the user's selection).

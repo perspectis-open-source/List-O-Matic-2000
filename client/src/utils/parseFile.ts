@@ -1,3 +1,8 @@
+/**
+ * @file parseFile.ts
+ * @description Parse CSV/Excel contact files; detect company and entity columns; return data, headers, and column keys.
+ * @module List-O-Matic-2000/client
+ */
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 

@@ -1,5 +1,7 @@
 /**
- * Writes client/public/crm-companies-500.csv with 500 company names (one per line, header "Company").
+ * @file generate-crm-companies.js
+ * @description Writes client/public/crm-companies-500.csv with 500 company names (one per line, header "Company").
+ * @module List-O-Matic-2000/client/scripts
  */
 import fs from 'fs'
 import path from 'path'

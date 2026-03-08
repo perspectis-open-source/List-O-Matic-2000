@@ -1,3 +1,8 @@
+/**
+ * @file utils.tsx
+ * @description Test render helper with MUI ThemeProvider for component tests.
+ * @module List-O-Matic-2000/client
+ */
 import type { ReactElement } from 'react'
 import { render, type RenderOptions } from '@testing-library/react'
 import { ThemeProvider, CssBaseline } from '@mui/material'

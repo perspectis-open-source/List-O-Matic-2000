@@ -1,3 +1,8 @@
+/**
+ * @file exportCsv.ts
+ * @description CSV export helpers: filename sanitization, UTF-8 BOM, formula-injection mitigation, and download.
+ * @module List-O-Matic-2000/client
+ */
 import Papa from 'papaparse'
 import type { ContactRow } from './parseFile'
 

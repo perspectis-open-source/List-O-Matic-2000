@@ -1,3 +1,8 @@
+/**
+ * @file UploadDropZone.test.tsx
+ * @description Vitest unit tests for UploadDropZone component.
+ * @module List-O-Matic-2000/client
+ */
 import { describe, it, expect } from 'vitest'
 import { screen } from '@testing-library/react'
 import { render } from '../test/utils'

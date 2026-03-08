@@ -1,3 +1,8 @@
+/**
+ * @file eslint.config.js
+ * @description ESLint flat config for client: TypeScript, React hooks, react-refresh.
+ * @module List-O-Matic-2000/client
+ */
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'

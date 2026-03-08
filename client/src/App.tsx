@@ -1,3 +1,8 @@
+/**
+ * @file App.tsx
+ * @description Main application: tabs (Contacts / AI Results), upload, company select, AI Search, and results table.
+ * @module List-O-Matic-2000/client
+ */
 import { useState, useCallback, useMemo, useRef } from 'react'
 import {
   ThemeProvider,
