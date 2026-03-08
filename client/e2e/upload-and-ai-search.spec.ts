@@ -5,6 +5,9 @@
  */
 import { test, expect } from '@playwright/test'
 import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const mockChatResponse = {
   matchingCompanyNames: ['Acme Inc'],
@@ -31,7 +34,7 @@ test.describe('Upload and AI Search flow', () => {
 
     await expect(page.getByTestId('company-select-input')).toBeVisible()
     await page.getByTestId('company-select-input').click()
-    await page.getByText('Acme Inc', { exact: true }).click()
+    await page.getByRole('option', { name: 'Acme Inc' }).click()
 
     await expect(page.getByTestId('ai-search-button')).toBeEnabled()
 
@@ -72,7 +75,7 @@ test.describe('Upload and AI Search flow', () => {
     await expect(page.getByTestId('main-content')).toContainText('3 rows')
 
     await page.getByTestId('company-select-input').click()
-    await page.getByText('Acme Inc', { exact: true }).click()
+    await page.getByRole('option', { name: 'Acme Inc' }).click()
     await page.route('**/api/chat', async (route) => {
       await route.fulfill({
         status: 200,
@@ -104,7 +107,7 @@ test.describe('Upload and AI Search flow', () => {
     const fileInput = page.getByRole('dialog').locator('input[type="file"]')
     await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-contacts.csv'))
     await page.getByTestId('company-select-input').click()
-    await page.getByText('Acme Inc', { exact: true }).click()
+    await page.getByRole('option', { name: 'Acme Inc' }).click()
 
     let resolveFulfill: () => void
     const fulfillPromise = new Promise<void>((resolve) => {
