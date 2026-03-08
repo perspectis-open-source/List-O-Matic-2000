@@ -1,6 +1,6 @@
 # List-O-Matic 2000 — Full build plan
 
-This document is the **single source of truth** for rebuilding the application from scratch. Follow sections 1–17 in order. A builder (human or AI) can recreate the complete app using only this file and the repo README for quick reference.
+This document is the **single source of truth** for rebuilding the application from scratch. Follow sections 1–18 in order. A builder (human or AI) can recreate the complete app using only this file and the repo README for quick reference.
 
 ---
 
@@ -230,7 +230,7 @@ server/
 
 **LLM search dialog**
 
-- While `aiSearchLoading` is true, show a modal dialog (data-testid: llm-search-dialog): title "LLM searching..." with a small CircularProgress. Body: a log area showing lines from processLogLines. Initial line: "LLM: Starting...". Then append lines at ~700 ms interval: "LLM: Connecting...", "LLM: Sending company list (N names)...", "LLM: Identifying parent company...", "LLM: Looking up subsidiaries and brands...", "LLM: Matching subsidiaries and variants to your list...", "LLM: Checking misspellings and name variants...", "LLM: Validating matches...", "LLM: Preparing response...", "LLM: Finalizing results...". On success append "LLM: Complete."; on error append "LLM: Error — {message}". The log area has a **shimmer animation** (CSS keyframes, gradient overlay, e.g. 2.5s ease-in-out infinite). Below the log, show warning text: **"This data is being computed by an LLM. It may be inaccurate or incomplete. Please check before using."**
+- While `aiSearchLoading` is true, show a modal dialog (data-testid: llm-search-dialog): title "LLM searching..." with a small CircularProgress. Body: a log area showing lines from processLogLines. Initial line: "LLM: Starting...". Then append lines at ~700 ms interval: "LLM: Connecting...", "LLM: Sending company list (N names)...", "LLM: Identifying parent company...", "LLM: Looking up subsidiaries and brands...", "LLM: Matching subsidiaries and variants to your list...", "LLM: Checking misspellings and name variants...", "LLM: Validating matches...", "LLM: Preparing response...", "LLM: Finalizing results...". On success append "LLM: Complete."; on error append "LLM: Error — {message}". The log area has a **shimmer animation** (CSS keyframes, gradient overlay, e.g. 2.5s ease-in-out infinite). Below the log, show warning text: **"LLM results may be incorrect or inaccurate. Please check results."**
 
 ---
 
@@ -392,7 +392,7 @@ server/
 2. **Upload + AI Search**: click upload-trigger; setInputFiles to fixture; expect main-content to contain fileName and "3 rows"; click company-select-input; click getByRole('option', { name: 'Acme Inc' }); route /api/chat with mock; click ai-search-button; click tab "AI Results"; expect "contacts matching your search" and export-results-button visible.
 3. **Contacts Export list**: after upload, expect tab-contacts and export-import-list-button visible with text "Export list".
 4. **Remove records**: after AI Search and 2 results, click remove-from-import-button; expect tab Contacts and "1 row"; switch to AI Results; expect "2 contacts matching" and export-results-button still visible.
-5. **LLM dialog**: during AI Search, expect dialog (data-testid llm-search-dialog) visible with text matching "computed by an LLM" and "may be inaccurate".
+5. **LLM dialog**: during AI Search, expect dialog (data-testid llm-search-dialog) visible with text matching "LLM results may be incorrect or inaccurate" and "Please check results."
 
 **data-testid list**
 
@@ -412,6 +412,44 @@ server/
 
 ---
 
-## 17. Out of scope
+## 17. Production hardening
+
+When deploying to production, implement the following so the system is robust, observable, and safe under load.
+
+**Timeouts**
+
+- Set an explicit timeout on each LLM request (e.g. 30–60 seconds). If the LLM or agent does not respond in time, return 504 Gateway Timeout or 503 and a safe error message to the client. Do not leave requests hanging indefinitely.
+
+**Retries**
+
+- Define a retry policy for transient upstream failures (e.g. OpenAI 429 or 5xx). Either: retry with backoff (e.g. exponential, max 2–3 attempts) and then return 502/503, or document "no retries" and return 502/503 on first failure. Avoid unbounded retries.
+
+**Rate limiting**
+
+- Apply rate limiting to POST /api/chat (e.g. per IP or per API key) to protect the backend and the LLM from abuse. Return 429 when the limit is exceeded. If auth is added later, rate limit per user or tenant.
+
+**Logging**
+
+- Log request-level metadata that does not include PII: e.g. request id, timestamp, uniqueCompanyNames count, batch count, response status, duration, and error type. Never log contact rows, names, emails, or the full list of company names. Use structured logs (e.g. JSON) for production.
+
+**Input limits**
+
+- Optionally cap the length of uniqueCompanyNames (e.g. 10,000–20,000) and the length of each company name string (e.g. 500 characters) to bound cost and payload size. Reject with 400 and a clear message if exceeded.
+
+**Health and readiness**
+
+- Keep GET /health returning { ok: true } for liveness. Optionally add a readiness check that verifies OPENAI_API_KEY is set and (if desired) that the LLM provider is reachable; return 503 when not ready so load balancers can avoid the instance.
+
+**Production API URL**
+
+- In production, the client may be served from a different origin. Set VITE_API_URL at build time so the client calls the correct API base URL, or use a reverse proxy so /api is same-origin and no client change is needed.
+
+**Stack versions**
+
+- The plan pins specific stack versions (e.g. React 19, Vite 7). When upgrading, re-run tests and update the plan if behavior or constraints change. The constraints and security rules in this document take precedence over version numbers.
+
+---
+
+## 18. Out of scope
 
 - Google Sheets import; user authentication; streaming LLM responses; sending any PII to the server; editing or deleting individual contact rows (only the "Remove records from Import List" bulk action is in scope).

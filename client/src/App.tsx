@@ -313,7 +313,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
             variant="body2"
             sx={{ mt: 2, color: 'error.main', fontWeight: 500 }}
           >
-            This data is being computed by an LLM. It may be inaccurate or incomplete. Please check before using.
+            LLM results may be incorrect or inaccurate. Please check results.
           </Typography>
         </DialogContent>
       </Dialog>
