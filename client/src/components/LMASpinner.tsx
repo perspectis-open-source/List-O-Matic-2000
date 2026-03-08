@@ -26,7 +26,7 @@ export function LMASpinner() {
           color: LMA_CHARCOAL,
         }}
       >
-        LMA
+        List-O-Matic 2000
       </Box>
     </Box>
   )

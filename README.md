@@ -1,6 +1,10 @@
-# Marketing Demo: Contact List + AI Agent
+# List-O-Matic 2000
 
-A demo app for marketing: upload a contact list (CSV/Excel), then ask the chatbot to find everyone at a company. The LLM receives only **company names** (no PII); the frontend filters the contact list locally and displays results. See **[PLAN.md](./PLAN.md)** for the full build plan (living document for handoff to another person or LLM).
+**Open source** — Upload a contact list (CSV/Excel), then use AI to find everyone at a company. The LLM receives only **company names** (no PII); the frontend filters the contact list locally and displays results.
+
+- [Quick start](#quick-start) · [Tests](#run-tests) · [Contributing](./CONTRIBUTING.md) · [Code of Conduct](./CODE_OF_CONDUCT.md) · [License](./LICENSE)
+
+See **[PLAN.md](./PLAN.md)** for the full build plan and spec.
 
 ## Quick start
 
@@ -34,7 +38,7 @@ npm run dev
 - **Unit tests (Vitest)**: `cd client && npm run test` (watch) or `npm run test:run` (single run). Coverage: `npm run test:coverage`.
 - **Component tests**: Same Vitest run; tests live next to components (`*.test.tsx`) and in `src/utils/*.test.ts`, `src/api/*.test.ts`. Use `src/test/utils.tsx` for theme-wrapped render.
 - **Storybook**: `cd client && npm run storybook` (port 6006). Stories in `src/**/*.stories.tsx`; preview uses the app MUI theme.
-- **E2E (Playwright)**: `cd client && npm run test:e2e`. E2E mocks `POST /api/chat` via `page.route()` so the backend is not required. Tests and fixtures in `client/e2e/`. Set `PLAYWRIGHT_BASE_URL` when running against a deployed app.
+- **E2E (Playwright)**: `cd client && npm run test:e2e`. E2E mocks `POST /api/chat` via `page.route()` so the backend is not required. Tests cover: upload + AI search flow, Export list on Contacts tab, Remove records from Import List and persisted AI results when switching back, and LLM search dialog warning. Tests and fixtures in `client/e2e/`. Set `PLAYWRIGHT_BASE_URL` when running against a deployed app.
 - **Server**: `cd server && npm run test` (if present).
 
 ## Repo layout
@@ -60,3 +64,7 @@ Then upload that file in the app (or open the app and use "Upload file" to selec
 | `OPENAI_API_KEY` | OpenAI API key (or equivalent)       |
 | `CORS_ORIGIN`    | Frontend origin (e.g. http://localhost:5173) |
 | `PORT`           | Server port (e.g. 3001)              |
+
+## License
+
+This project is open source under the [MIT License](./LICENSE).

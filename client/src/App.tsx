@@ -68,6 +68,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
   const [aiSearchError, setAiSearchError] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   const [reasoningSteps, setReasoningSteps] = useState<ReasoningStep[] | null>(null)
+  const [persistedAiResultRows, setPersistedAiResultRows] = useState<ContactRow[] | null>(null)
   const [processLogLines, setProcessLogLines] = useState<string[]>([])
   const processLogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -79,6 +80,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     setAiSearchError(null)
     setExportError(null)
     setReasoningSteps(null)
+    setPersistedAiResultRows(null)
     setOverrideCompanyName(null)
     setCompanyNameOverrideInput('')
     try {
@@ -122,15 +124,25 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     })
   }, [contacts, companyColumnKey, matchingCompanyNames, excludedMatchNames])
 
+  const displayedAiResultRows = useMemo(() => {
+    if (persistedAiResultRows == null) return aiResultsContacts
+    if (!companyColumnKey) return []
+    const excludedSet = new Set(excludedMatchNames.map((n) => String(n).trim()).filter(Boolean))
+    return persistedAiResultRows.filter((row) => {
+      const cell = String((row[companyColumnKey] ?? '')).trim()
+      return cell && !excludedSet.has(cell)
+    })
+  }, [persistedAiResultRows, aiResultsContacts, excludedMatchNames, companyColumnKey])
+
   const { aiResultsHeaders, aiResultsContactsWithDescription } = useMemo(() => {
     const extendedHeaders = [...headers, 'Parent company']
-    const withDescription: ContactRow[] = aiResultsContacts.map((row) => ({
+    const withDescription: ContactRow[] = displayedAiResultRows.map((row) => ({
       ...row,
       'Parent company': inferredParentCompany ?? '',
       ...(companyColumnKey != null && overrideCompanyName != null ? { [companyColumnKey]: overrideCompanyName } : {}),
     }))
     return { aiResultsHeaders: extendedHeaders, aiResultsContactsWithDescription: withDescription }
-  }, [headers, aiResultsContacts, inferredParentCompany, overrideCompanyName, companyColumnKey])
+  }, [headers, displayedAiResultRows, inferredParentCompany, overrideCompanyName, companyColumnKey])
 
   const effectiveCompany = (selectedCompany?.trim() || companyInputValue?.trim() || '') || null
 
@@ -178,6 +190,12 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
       setExcludedMatchNames([])
       setInferredParentCompany(res.parentCompany ?? null)
       setReasoningSteps(res.reasoningSteps ?? null)
+      const matchedNames = res.matchingCompanyNames ?? []
+      const matchedRows = contacts.filter((row) => {
+        const cell = companyColumnKey ? String(row[companyColumnKey] ?? '').trim() : ''
+        return cell && matchedNames.includes(cell)
+      })
+      setPersistedAiResultRows(matchedRows)
       setActiveTab('aiResults')
       setTimeout(() => setAiSearchLoading(false), 1200)
     } catch (e) {
@@ -191,9 +209,10 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
       setExcludedMatchNames([])
       setInferredParentCompany(null)
       setReasoningSteps(null)
+      setPersistedAiResultRows(null)
       setTimeout(() => setAiSearchLoading(false), 2000)
     }
-  }, [effectiveCompany, companyColumnKey, uniqueCompanyNames, aiSearchLoading])
+  }, [effectiveCompany, companyColumnKey, uniqueCompanyNames, aiSearchLoading, contacts])
 
   const handleExportResults = useCallback(() => {
     setExportError(null)
@@ -206,6 +225,18 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
       setExportError(e instanceof Error ? e.message : 'Export failed. Please try again.')
     }
   }, [selectedCompany, aiResultsContactsWithDescription, aiResultsHeaders])
+
+  const handleRemoveResultsFromImport = useCallback(() => {
+    const toRemove = new Set(displayedAiResultRows)
+    setContacts((prev) => prev.filter((row) => !toRemove.has(row)))
+    setActiveTab('contacts')
+  }, [displayedAiResultRows])
+
+  const handleExportImportList = useCallback(() => {
+    const date = new Date().toISOString().slice(0, 10)
+    const base = fileName ? sanitizeFilenameSegment(fileName.replace(/\.[^.]+$/, '')) : 'import-list'
+    downloadCsv(contacts, headers, `${base}-${date}.csv`)
+  }, [contacts, headers, fileName])
 
   const hasFile = contacts.length > 0
 
@@ -228,7 +259,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
         onFileAccepted={handleFileAccepted}
       />
 
-      <Dialog open={aiSearchLoading} disableEscapeKeyDown maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 2 } }}>
+      <Dialog open={aiSearchLoading} disableEscapeKeyDown maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 2 }, 'data-testid': 'llm-search-dialog' } as object}>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <CircularProgress size={24} color="primary" />
           LLM searching...
@@ -377,13 +408,29 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
             </Tabs>
 
             {activeTab === 'contacts' && (
-<ContactsTable
+              <Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 1 }}>
+                  <Typography variant="subtitle2" color="primary">
+                    Import list — {contacts.length.toLocaleString()} row{contacts.length !== 1 ? 's' : ''}
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<DownloadIcon />}
+                    onClick={handleExportImportList}
+                    data-testid="export-import-list-button"
+                  >
+                    Export list
+                  </Button>
+                </Box>
+                <ContactsTable
                   contacts={contacts}
                   headers={headers}
                   maxHeight={520}
                   companyColumnKey={companyColumnKey}
                   entityColumnKey={entityColumnKey}
                 />
+              </Box>
             )}
 
             {activeTab === 'aiResults' && (
@@ -397,7 +444,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                 ) : (
                   <>
                     <Typography variant="subtitle2" color="primary" sx={{ mb: 2 }}>
-                      {aiResultsContacts.length.toLocaleString()} contacts matching your search.
+                      {displayedAiResultRows.length.toLocaleString()} contacts matching your search.
                     </Typography>
                     {reasoningSteps != null && reasoningSteps.length > 0 && (
                       <Accordion defaultExpanded={false} sx={{ mb: 2, borderRadius: 2, '&:before': { display: 'none' }, border: 1, borderColor: 'divider' }}>
@@ -488,15 +535,25 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                         <Typography variant="subtitle2" color="primary">
                           Results table — {aiResultsContactsWithDescription.length.toLocaleString()} row{aiResultsContactsWithDescription.length !== 1 ? 's' : ''}
                         </Typography>
-                        <Button
-                          variant="contained"
-                          size="small"
-                          startIcon={<DownloadIcon />}
-                          onClick={handleExportResults}
-                          data-testid="export-results-button"
-                        >
-                          Export results
-                        </Button>
+                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                          <Button
+                            variant="contained"
+                            size="small"
+                            startIcon={<DownloadIcon />}
+                            onClick={handleExportResults}
+                            data-testid="export-results-button"
+                          >
+                            Export results
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={handleRemoveResultsFromImport}
+                            data-testid="remove-from-import-button"
+                          >
+                            Remove records from Import List
+                          </Button>
+                        </Box>
                       </Box>
                       {exportError && (
                         <Alert severity="error" onClose={() => setExportError(null)} sx={{ mb: 1 }}>

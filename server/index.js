@@ -173,6 +173,7 @@ In each "detail", state that the list entry is imported data being matched to th
 Return ONLY valid JSON.`
 
 async function askLLM(openai, batchNames, inputCompanyQuery, refinementContext = null) {
+  console.log('[askLLM] openai:', typeof openai, 'batchNames:', batchNames?.length, 'items, sample:', batchNames?.slice(0, 5), 'inputCompanyQuery:', inputCompanyQuery, 'refinementContext:', refinementContext ? { originalCompany: refinementContext.originalCompany, previousMatchingCount: refinementContext.previousMatchingNames?.length, lastUserContent: refinementContext.lastUserContent?.slice(0, 80) } : null)
   let userPrompt = `User input (company name or query): ${inputCompanyQuery}\n\nList of company names below. You must do BOTH of the following:\n\n(1) Parent variants: Include every line that is the parent (bare, + Inc/Corp/Ltd/Co/LLC/Computer, ticker, or clear typo). Include the same company with any legal suffix—the parent name + Inc, Ltd, Corp, LLC, Co, etc. are all the same parent; scan for every parent+Corp, parent+Ltd, parent+Inc, etc., and typos.\n\n(2) Subsidiaries and brands: Include every line that is a subsidiary or a product/consumer brand of the parent. If the parent has product brands (e.g. beverage or consumer brands), include every list entry that matches those brands, with or without LLC/Inc/Co. Do not omit brands.\n\nReturn every matching line. Copy each name exactly as it appears.\n\nList:\n${batchNames.join('\n')}`
   if (refinementContext) {
     const scopeLine = refinementContext.originalCompany
@@ -215,12 +216,15 @@ async function askLLM(openai, batchNames, inputCompanyQuery, refinementContext =
         }))
     : []
   const names = parsed.matchingCompanyNames ?? parsed.matching_names ?? []
-  return {
+  const parentCompany = typeof parsed.parentCompany === 'string' ? parsed.parentCompany.trim() : null
+  const result = {
     matchingCompanyNames: Array.isArray(names) ? names : [],
-    parentCompany: typeof parsed.parentCompany === 'string' ? parsed.parentCompany.trim() : null,
+    parentCompany,
     explanation: typeof parsed.explanation === 'string' ? parsed.explanation : '',
     reasoningSteps: steps,
   }
+  console.log('[askLLM] result:', { parentCompany: result.parentCompany, matchingCount: result.matchingCompanyNames.length, explanation: result.explanation?.slice(0, 80) })
+  return result
 }
 
 const AGENT_SYSTEM_PROMPT = `${SYSTEM_PROMPT_MATCH}
@@ -228,6 +232,7 @@ const AGENT_SYSTEM_PROMPT = `${SYSTEM_PROMPT_MATCH}
 You may call the search_web tool with a query like "[Parent company] subsidiaries and brands" to help list that parent's subsidiaries and brands before building matchingCompanyNames. When done, respond with the JSON object (parentCompany, matchingCompanyNames, explanation, reasoningSteps). Copy names only from the provided list.`
 
 async function runAgentLoop(openai, batchNames, inputCompanyQuery, refinementContext = null) {
+  console.log('[runAgentLoop] openai:', typeof openai, 'batchNames:', batchNames?.length, 'items, sample:', batchNames?.slice(0, 5), 'inputCompanyQuery:', inputCompanyQuery, 'refinementContext:', refinementContext ? { originalCompany: refinementContext.originalCompany, previousMatchingCount: refinementContext.previousMatchingNames?.length, lastUserContent: refinementContext.lastUserContent?.slice(0, 80) } : null)
   let userPrompt = `User input (company name or query): ${inputCompanyQuery}\n\nList of company names below. You must do BOTH of the following:\n\n(1) Parent variants: Include every line that is the parent (bare, + Inc/Corp/Ltd/Co/LLC/Computer, ticker, or clear typo). Include the same company with any legal suffix—the parent name + Inc, Ltd, Corp, LLC, Co, etc. are all the same parent; scan for every parent+Corp, parent+Ltd, parent+Inc, etc., and typos.\n\n(2) Subsidiaries and brands: Include every line that is a subsidiary or a product/consumer brand of the parent. If the parent has product brands (e.g. beverage or consumer brands), include every list entry that matches those brands, with or without LLC/Inc/Co. Do not omit brands.\n\nReturn every matching line. Copy each name exactly as it appears.\n\nList:\n${batchNames.join('\n')}`
   if (refinementContext) {
     const scopeLine = refinementContext.originalCompany
@@ -265,6 +270,7 @@ async function runAgentLoop(openai, batchNames, inputCompanyQuery, refinementCon
             q = `${scopeCompany} ${q}`.trim()
           }
           const result = mockSearchWeb(q, scopeCompany)
+          console.log('[runAgentLoop] tool search_web query:', q)
           messages.push({ role: 'tool', tool_call_id: tc.id, content: result || 'No results.' })
         }
       }
@@ -290,12 +296,15 @@ async function runAgentLoop(openai, batchNames, inputCompanyQuery, refinementCon
               }))
           : []
         const names = parsed.matchingCompanyNames ?? parsed.matching_names ?? []
-        return {
+        const parentCompany = typeof parsed.parentCompany === 'string' ? parsed.parentCompany.trim() : null
+        const result = {
           matchingCompanyNames: Array.isArray(names) ? names : [],
-          parentCompany: typeof parsed.parentCompany === 'string' ? parsed.parentCompany.trim() : null,
+          parentCompany,
           explanation: typeof parsed.explanation === 'string' ? parsed.explanation : '',
           reasoningSteps: steps,
         }
+        console.log('[runAgentLoop] result:', { parentCompany: result.parentCompany, matchingCount: result.matchingCompanyNames.length })
+        return result
       }
     }
     break
@@ -317,6 +326,7 @@ app.post('/api/chat', async (req, res, next) => {
     }
 
     const { uniqueCompanyNames, lastUserContent, previousMatchingNames, isRefinement, originalCompany } = validated
+    console.log('[POST /api/chat] request:', { uniqueCompanyNamesCount: uniqueCompanyNames?.length, lastUserContent: lastUserContent?.slice(0, 100), isRefinement, originalCompany: originalCompany ?? null })
     const refinementContext = isRefinement && previousMatchingNames.length > 0
       ? { previousMatchingNames, lastUserContent, originalCompany }
       : null
@@ -368,6 +378,7 @@ app.post('/api/chat', async (req, res, next) => {
     const payload = { matchingCompanyNames, explanation: explanation || undefined }
     if (parentCompany) payload.parentCompany = parentCompany
     if (reasoningSteps.length > 0) payload.reasoningSteps = reasoningSteps
+    console.log('[POST /api/chat] response:', { parentCompany: payload.parentCompany, matchingCount: matchingCompanyNames.length })
     return res.status(200).json(payload)
   } catch (err) {
     if (err.status === 429) return res.status(429).json({ error: 'Rate limit exceeded' })

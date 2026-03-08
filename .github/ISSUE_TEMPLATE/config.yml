@@ -1,0 +1,6 @@
+blank_issues_enabled: true
+# Optional: add a contact link for security issues after creating the repo:
+# contact_links:
+#   - name: Security vulnerability
+#     url: https://github.com/YOUR_ORG/List-O-Matic-2000/security/policy
+#     about: Report a security issue (see SECURITY.md)
