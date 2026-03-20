@@ -17,6 +17,7 @@ import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import OpenAI from 'openai'
+import { crmRouter } from './crmConnector.js'
 
 const app = express()
 const PORT = process.env.PORT ?? 3001
@@ -389,6 +390,8 @@ app.post('/api/chat', async (req, res, next) => {
     next(err)
   }
 })
+
+app.use(crmRouter)
 
 // Catch any unhandled errors (e.g. PayloadTooLargeError from body-parser, OpenAI SDK)
 app.use((err, _req, res, _next) => {
