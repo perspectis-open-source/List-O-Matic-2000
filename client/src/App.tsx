@@ -45,6 +45,7 @@ import { UploadDropZone } from './components/UploadDropZone'
 import { ContactsTable } from './components/ContactsTable'
 import { CompanySelect } from './components/CompanySelect'
 import { postChat, type ReasoningStep } from './api/chat'
+import { CrmExportFeature } from './components/CrmExportFeature'
 
 type TabValue = 'contacts' | 'aiResults'
 
@@ -550,6 +551,10 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                           >
                             Export results
                           </Button>
+                          <CrmExportFeature
+                            contacts={aiResultsContactsWithDescription}
+                            headers={aiResultsHeaders}
+                          />
                           <Button
                             variant="outlined"
                             size="small"

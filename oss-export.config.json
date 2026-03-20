@@ -1,0 +1,27 @@
+{
+  "allowedPaths": [
+    "client",
+    "server/index.js",
+    "server/.env.example",
+    "server/package.json",
+    "README.md",
+    "LICENSE",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "ROADMAP.md",
+    "BOUNDARIES.md",
+    "CLOUD_TERMS.md",
+    "PRIVACY.md",
+    "TRADEMARK.md",
+    ".github"
+  ],
+  "blockedTokenPatterns": [
+    "import\\s+.+from\\s+['\\\"]stripe['\\\"]",
+    "require\\(['\\\"]stripe['\\\"]\\)",
+    "process\\.env\\.STRIPE_[A-Z0-9_]+",
+    "process\\.env\\.WEBHOOK_SECRET",
+    "process\\.env\\.BILLING_[A-Z0-9_]+",
+    "process\\.env\\.CLOUD_[A-Z0-9_]+"
+  ]
+}

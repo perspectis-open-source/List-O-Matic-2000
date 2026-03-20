@@ -33,6 +33,7 @@ See [README.md](./README.md) for full setup and env details.
 - **Unit / component (client):** `cd client && npm run test:run`
 - **E2E (client):** `cd client && npm run test:e2e` (ensure nothing is using port 5173)
 - **Coverage:** `cd client && npm run test:coverage`
+- **Boundary checks (repo root):** `npm run verify:boundaries` and `npm run verify:oss-export`
 
 ## How to contribute
 
@@ -53,3 +54,9 @@ This project adheres to the [Contributor Covenant Code of Conduct](./CODE_OF_CON
 ## License
 
 By contributing, you agree that your contributions will be licensed under the [MIT License](./LICENSE).
+
+## Open source vs managed cloud
+
+- Contributions in this repository are for the open source codebase.
+- Managed cloud operations/internals (for example hosted account and billing operations) may live outside this repository.
+- Cloud/billing internals must not be introduced in OSS paths; see [`BOUNDARIES.md`](./BOUNDARIES.md).

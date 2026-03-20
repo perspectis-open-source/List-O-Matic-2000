@@ -1,58 +1,56 @@
 # List-O-Matic 2000 — Roadmap
 
-**New plan** (as of 2025). The app is built and open source; this document is the single place for **what we do next**.
+The project runs as:
+- **Open source MIT core** (free self-hosted)
+- **Managed Cloud** (single paid utility plan at **$13.99/month**)
 
----
+Enterprise packaging is intentionally out of launch scope and may be evaluated later.
 
 ## Current status
 
-- **Product**: Contact list upload (CSV/Excel) → company search → AI Search → results in second tab. PII stays in the browser; only company names go to the LLM.
-- **Repo**: Public at `perspectis-open-source/List-O-Matic-2000`. LICENSE (MIT), CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, and GitHub templates in place.
-- **Implementation**: Core flow done (upload, parse, company select, AI Search, AI Results, export, tooltips, theming). Agentic features (reasoning steps, web search, follow-up refinement) per PLAN-AGENTIC.md.
+- Product flow is live: upload contacts -> select company -> AI Search -> export results.
+- Core privacy posture remains: only company names go to the API; PII stays in browser processing.
+- OSS/cloud boundary policy is active: this public repo stays OSS-safe, while billing/account internals are implemented in private cloud runtime.
 
----
+## Track A — OSS roadmap
 
-## Phase 1 — Ship & stabilize (priority)
+- Keep onboarding smooth: docs, setup, tests, and contribution hygiene.
+- Keep CI stable and tests current for import/search/export flows.
+- Keep self-hosting first-class and clearly documented.
 
-| Goal | Actions |
-|------|--------|
-| **CI green** | Fix any failing tests; ensure `main` stays green on push/PR. |
-| **Tests up to date** | Remove or update tests that referenced removed pieces (e.g. ChatWindow). Add E2E for: select company → AI Search → Export → assert download. |
-| **Docs match product** | README quick start and env table accurate. CONTRIBUTING clone URL uses real org/repo (e.g. `perspectis-open-source/List-O-Matic-2000`). |
-| **First release** | Tag `v1.0.0` (or `v0.1.0`) when Phase 1 is done. Add a short CHANGELOG or release notes. |
+Done when:
+- New contributors can clone, run, and test without friction.
+- Docs always match current behavior and environment requirements.
 
-**Done when**: Default branch is protected with passing CI; new contributors can clone, install, and run tests; one version tag exists.
+## Track B — Cloud roadmap (launch scope)
 
----
+### Phase 1: foundation
 
-## Phase 2 — Community & maintainability
+- Keep one cloud plan: `$13.99/month`.
+- Keep billing architecture extensible:
+  - `plans` catalog (start with one active plan)
+  - `subscriptions` linked by `planId`
+  - `entitlements` checks (features + limits)
+  - centralized billing service for checkout/cancel lifecycle
+- Publish cloud docs/legal baseline: cloud terms, privacy, trademark.
 
-| Goal | Actions |
-|------|--------|
-| **Contributing friction low** | Clear “good first issue” or “help wanted” labels; small, scoped issues where possible. |
-| **Storybook current** | Stories for main flows (UploadDropZone, ContactsTable, CompanySelect, AI Search / Results). Run in CI (e.g. build or static export) if useful. |
-| **Dependencies & security** | `npm audit` (and fix or document); Dependabot or similar if desired. |
-| **Deploy story** | Document or script for “run in production” (e.g. build client, run server, env vars). Optional: one-click deploy (e.g. Render, Fly, Vercel + serverless). |
+### Phase 2: launch
 
-**Done when**: A new contributor can find something to work on and open a PR with confidence; the app can be deployed from the repo.
+- Add account/workspace lifecycle for managed cloud users.
+- Connect billing flow end-to-end (provider integration, webhook sync, cancel path).
+- Launch cloud publicly and monitor activation + month-1 retention.
 
----
+Done when:
+- A user can sign up, subscribe, use the utility, and cancel without manual operator work.
+- A second subscription plan can be added mostly through plan configuration and entitlement rules (not rewrites).
 
-## Phase 3 — Optional enhancements
+## Future optional track
 
-Defer until Phases 1–2 are solid. Pick by value vs effort.
+- Enterprise capabilities (for example SSO/procurement needs) are optional future work only if customer demand justifies it.
 
-- **UX**: Keyboard shortcuts; accessibility pass (focus, labels, screen reader); mobile-friendly layout.
-- **Features**: Optional Google Sheets import (per PLAN out-of-scope note); configurable company/entity column names; “Remove from import list” / persisted AI results (if not already done).
-- **Backend**: Rate limiting; health check endpoint; optional multi-provider LLM (e.g. OpenAI + Anthropic).
-- **Observability**: Optional logging/metrics for API usage (no PII); error tracking (e.g. Sentry) with PII stripped.
+## Working cadence
 
----
+- Prioritize OSS reliability and cloud launch tasks in parallel.
+- Keep this file updated whenever scope changes.
 
-## How to use this plan
-
-- **Sprints / cycles**: Take 1–2 items from Phase 1 until it’s complete, then Phase 2.
-- **Issues**: Create GitHub issues from this roadmap and link them here (e.g. “Phase 1: E2E for export”).
-- **Updates**: Edit ROADMAP.md when priorities change; keep “Current status” and “Done when” criteria accurate.
-
-For **how the app was built** (spec, constraints, file layout), see [PLAN.md](./PLAN.md). For agentic behavior, see [PLAN-AGENTIC.md](./PLAN-AGENTIC.md).
+For implementation detail and build spec, see [PLAN.md](./PLAN.md).

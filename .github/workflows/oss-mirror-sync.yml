@@ -1,0 +1,70 @@
+name: OSS Mirror Sync
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  export-oss:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify and build OSS export
+        run: |
+          node scripts/verify-boundaries.mjs
+          node scripts/verify-oss-export.mjs
+
+      - name: Upload OSS export artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss-export
+          path: .oss-export/
+          retention-days: 7
+
+  sync-mirror:
+    runs-on: ubuntu-latest
+    needs: [export-oss]
+    if: ${{ secrets.OSS_MIRROR_TOKEN != '' && secrets.OSS_MIRROR_REPO != '' }}
+    steps:
+      - name: Download OSS export artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: oss-export
+          path: oss-export
+
+      - name: Clone mirror repository
+        run: |
+          git clone "https://x-access-token:${{ secrets.OSS_MIRROR_TOKEN }}@github.com/${{ secrets.OSS_MIRROR_REPO }}.git" mirror-repo
+
+      - name: Sync export into mirror repo
+        run: |
+          rm -f oss-export/EXPORT_MANIFEST.json
+          rsync -a --delete oss-export/ mirror-repo/
+
+      - name: Commit and push mirror changes
+        working-directory: mirror-repo
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No mirror changes to publish."
+            exit 0
+          fi
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No staged mirror changes."
+            exit 0
+          fi
+
+          git -c user.name='oss-mirror-bot' -c user.email='oss-mirror-bot@users.noreply.github.com' \
+            commit -m "sync: OSS mirror from ${SOURCE_SHA}"
+          git push origin HEAD

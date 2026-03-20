@@ -1,0 +1,10 @@
+{
+  "name": "list-o-matic-2000-workspace",
+  "private": true,
+  "scripts": {
+    "verify:boundaries": "node scripts/verify-boundaries.mjs",
+    "verify:oss-export": "node scripts/verify-oss-export.mjs",
+    "test:server": "npm --prefix server test",
+    "test:client": "npm --prefix client run test:run"
+  }
+}
