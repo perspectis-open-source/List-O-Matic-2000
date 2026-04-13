@@ -12,13 +12,21 @@ const ACCEPT = {
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
 }
 
+export type UploadImportKind = 'contacts' | 'companies'
+
 type Props = {
   open: boolean
   onClose: () => void
   onFileAccepted: (file: File) => void
+  variant?: UploadImportKind
 }
 
-export function UploadDropZone({ open, onClose, onFileAccepted }: Props) {
+const TITLES: Record<UploadImportKind, string> = {
+  contacts: 'Upload contacts',
+  companies: 'Upload companies',
+}
+
+export function UploadDropZone({ open, onClose, onFileAccepted, variant = 'contacts' }: Props) {
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
       const file = acceptedFiles[0]
@@ -40,7 +48,7 @@ export function UploadDropZone({ open, onClose, onFileAccepted }: Props) {
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Upload contacts</DialogTitle>
+      <DialogTitle>{TITLES[variant]}</DialogTitle>
       <DialogContent>
         <Box
           {...getRootProps()}

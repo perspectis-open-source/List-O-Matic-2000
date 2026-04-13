@@ -24,4 +24,11 @@ describe('UploadDropZone', () => {
     expect(screen.getByText(/Upload contacts/)).toBeInTheDocument()
     expect(screen.getByText(/Drag and drop/)).toBeInTheDocument()
   })
+
+  it('shows companies title when variant is companies', () => {
+    render(
+      <UploadDropZone open={true} onClose={() => {}} onFileAccepted={() => {}} variant="companies" />
+    )
+    expect(screen.getByText(/Upload companies/)).toBeInTheDocument()
+  })
 })

@@ -4,3 +4,4 @@
  * @module List-O-Matic-2000/client
  */
 import '@testing-library/jest-dom/vitest'
+import '../agGridSetup'

@@ -1,6 +1,6 @@
 /**
  * @file App.tsx
- * @description Main application: tabs (Contacts / AI Results), upload, company select, AI Search, and results table.
+ * @description Main application: tabs (Contacts / Companies / Results), upload, company select, Contact Company Normalizer / Matcher (UI), and results table.
  * @module List-O-Matic-2000/client
  */
 import { useState, useCallback, useMemo, useRef } from 'react'
@@ -30,6 +30,7 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  Tooltip,
 } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { keyframes } from '@mui/system'
@@ -39,15 +40,26 @@ import LightModeIcon from '@mui/icons-material/LightMode'
 import SearchIcon from '@mui/icons-material/Search'
 import DownloadIcon from '@mui/icons-material/Download'
 import { getAppTheme } from './theme'
-import { parseContactFile, type ContactRow } from './utils/parseFile'
+import { parseContactFile, parseCompanyFile, type ContactRow, type CompanyRow } from './utils/parseFile'
 import { downloadCsv, sanitizeFilenameSegment } from './utils/exportCsv'
-import { UploadDropZone } from './components/UploadDropZone'
-import { ContactsTable } from './components/ContactsTable'
+import { UploadDropZone, type UploadImportKind } from './components/UploadDropZone'
+import { AgContactsGrid } from './components/AgContactsGrid'
+import { AgCompaniesGrid } from './components/AgCompaniesGrid'
 import { CompanySelect } from './components/CompanySelect'
 import { postChat, type ReasoningStep } from './api/chat'
+import { postMatchCompaniesBatched } from './api/matchCompanies'
 import { CrmExportFeature } from './components/CrmExportFeature'
+import { MatcherReviewPanel, type MatcherRowModel } from './components/MatcherReviewPanel'
+import {
+  canonicalNamesFromCompanies,
+  matchDeterministicBatch,
+  pickMatchedCompanyHeader,
+  topKForLlm,
+} from './utils/companyMatch'
 
-type TabValue = 'contacts' | 'aiResults'
+type TabValue = 'contacts' | 'companies' | 'aiResults'
+
+type AiResultsSubTab = 'normalizer' | 'matcher'
 
 const logShimmer = keyframes`
   0% { background-position: 200% 0; }
@@ -55,13 +67,18 @@ const logShimmer = keyframes`
 `
 
 function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMode: () => void }) {
-  const [uploadOpen, setUploadOpen] = useState(false)
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  const [uploadImportKind, setUploadImportKind] = useState<UploadImportKind>('contacts')
   const [contacts, setContacts] = useState<ContactRow[]>([])
   const [headers, setHeaders] = useState<string[]>([])
   const [companyColumnKey, setCompanyColumnKey] = useState<string | null>(null)
   const [entityColumnKey, setEntityColumnKey] = useState<string | null>(null)
   const [fileName, setFileName] = useState<string | null>(null)
   const [parseError, setParseError] = useState<string | null>(null)
+  const [companies, setCompanies] = useState<CompanyRow[]>([])
+  const [companyHeaders, setCompanyHeaders] = useState<string[]>([])
+  const [companyFileName, setCompanyFileName] = useState<string | null>(null)
+  const [companyParseError, setCompanyParseError] = useState<string | null>(null)
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
   const [companyInputValue, setCompanyInputValue] = useState('')
   const [matchingCompanyNames, setMatchingCompanyNames] = useState<string[]>([])
@@ -70,6 +87,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
   const [overrideCompanyName, setOverrideCompanyName] = useState<string | null>(null)
   const [companyNameOverrideInput, setCompanyNameOverrideInput] = useState('')
   const [activeTab, setActiveTab] = useState<TabValue>('contacts')
+  const [aiResultsSubTab, setAiResultsSubTab] = useState<AiResultsSubTab>('normalizer')
   const [aiSearchLoading, setAiSearchLoading] = useState(false)
   const [aiSearchError, setAiSearchError] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
@@ -78,7 +96,13 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
   const [processLogLines, setProcessLogLines] = useState<string[]>([])
   const processLogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const handleFileAccepted = useCallback(async (file: File) => {
+  const [matcherRunning, setMatcherRunning] = useState(false)
+  const [matcherError, setMatcherError] = useState<string | null>(null)
+  const [matcherRows, setMatcherRows] = useState<MatcherRowModel[]>([])
+  const [matcherSelections, setMatcherSelections] = useState<Record<string, string>>({})
+  const [matcherColumnKey, setMatcherColumnKey] = useState<string | null>(null)
+
+  const handleContactsFileAccepted = useCallback(async (file: File) => {
     setParseError(null)
     setSelectedCompany(null)
     setMatchingCompanyNames([])
@@ -89,6 +113,10 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     setPersistedAiResultRows(null)
     setOverrideCompanyName(null)
     setCompanyNameOverrideInput('')
+    setMatcherRows([])
+    setMatcherSelections({})
+    setMatcherError(null)
+    setMatcherColumnKey(null)
     try {
       const { data, headers: h, companyColumnKey: key, entityColumnKey: entityKey } = await parseContactFile(file)
       setContacts(data)
@@ -106,6 +134,22 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     }
   }, [])
 
+  const handleCompanyFileAccepted = useCallback(async (file: File) => {
+    setCompanyParseError(null)
+    setMatcherRows([])
+    setMatcherSelections({})
+    setMatcherError(null)
+    setMatcherColumnKey(null)
+    try {
+      const { data, headers: h } = await parseCompanyFile(file)
+      setCompanies(data)
+      setCompanyHeaders(h)
+      setCompanyFileName(file.name)
+    } catch (e) {
+      setCompanyParseError(e instanceof Error ? e.message : 'Failed to parse file')
+    }
+  }, [])
+
   const uniqueCompanyNames = useMemo(() => {
     if (!companyColumnKey || !contacts.length) return []
     const set = new Set<string>()
@@ -115,6 +159,113 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     }
     return Array.from(set)
   }, [contacts, companyColumnKey])
+
+  const matcherContactCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    if (!companyColumnKey) return m
+    for (const row of contacts) {
+      const v = String(row[companyColumnKey] ?? '').trim()
+      if (!v) continue
+      m.set(v, (m.get(v) ?? 0) + 1)
+    }
+    return m
+  }, [contacts, companyColumnKey])
+
+  const matcherCanRun = Boolean(contacts.length > 0 && companies.length > 0 && companyColumnKey)
+
+  const matcherCanonicalNames = useMemo(() => canonicalNamesFromCompanies(companies), [companies])
+
+  const handleRunMatcher = useCallback(async () => {
+    if (!companyColumnKey || !contacts.length || !companies.length) return
+    setMatcherError(null)
+    setMatcherRunning(true)
+    setMatcherRows([])
+    try {
+      const canon = canonicalNamesFromCompanies(companies)
+      const raws = uniqueCompanyNames
+      const det = matchDeterministicBatch(raws, canon)
+      const llmItems = det
+        .filter((d) => d.tier === 'needs_llm')
+        .map((d) => ({ raw: d.raw, topCandidates: topKForLlm(d) }))
+
+      const llmByRaw = new Map<string, { match: string | null; alternates?: string[] }>()
+      if (llmItems.length > 0) {
+        const llmResults = await postMatchCompaniesBatched(canon, llmItems)
+        for (const r of llmResults) {
+          llmByRaw.set(r.raw, { match: r.match, alternates: r.alternates })
+        }
+      }
+
+      const rows: MatcherRowModel[] = []
+      const initSel: Record<string, string> = {}
+
+      for (const d of det) {
+        const contactCount = matcherContactCounts.get(d.raw) ?? 0
+        const llm = llmByRaw.get(d.raw)
+        const source: MatcherRowModel['source'] =
+          d.tier === 'needs_llm' ? 'llm' : d.tier === 'ambiguous' ? 'ambiguous' : 'auto'
+
+        const hints = new Set<string>()
+        for (const t of d.topCandidates) hints.add(t.name)
+        if (llm?.match) hints.add(llm.match)
+        if (llm?.alternates) for (const a of llm.alternates) hints.add(a)
+
+        let suggested: string | null = null
+        if (d.tier === 'auto' && d.best) suggested = d.best
+        else if (llm?.match && canon.includes(llm.match)) suggested = llm.match
+        else if (d.topCandidates[0]) suggested = d.topCandidates[0].name
+
+        rows.push({
+          raw: d.raw,
+          source,
+          contactCount,
+          suggested,
+          optionHints: [...hints],
+        })
+
+        if (d.tier === 'auto' && d.best) initSel[d.raw] = d.best
+        else if (llm?.match && canon.includes(llm.match)) initSel[d.raw] = llm.match
+        else if (d.tier === 'ambiguous' && d.topCandidates[0]) initSel[d.raw] = d.topCandidates[0].name
+        else initSel[d.raw] = ''
+      }
+
+      rows.sort((a, b) => a.raw.localeCompare(b.raw))
+      setMatcherRows(rows)
+      setMatcherSelections(initSel)
+    } catch (e) {
+      setMatcherError(e instanceof Error ? e.message : 'Matcher failed')
+    } finally {
+      setMatcherRunning(false)
+    }
+  }, [companyColumnKey, companies, uniqueCompanyNames, matcherContactCounts])
+
+  const handleMatcherSelectionChange = useCallback((raw: string, value: string) => {
+    setMatcherSelections((prev) => ({ ...prev, [raw]: value }))
+  }, [])
+
+  const handleApplyMatcher = useCallback(() => {
+    if (!companyColumnKey || matcherRows.length === 0) return
+    const colKey = matcherColumnKey ?? pickMatchedCompanyHeader(headers)
+    if (!matcherColumnKey) setMatcherColumnKey(colKey)
+    setHeaders((h) => (h.includes(colKey) ? h : [...h, colKey]))
+    setContacts((prev) =>
+      prev.map((row) => {
+        const raw = String(row[companyColumnKey] ?? '').trim()
+        const pick = (matcherSelections[raw] ?? '').trim()
+        return { ...row, [colKey]: pick }
+      })
+    )
+  }, [companyColumnKey, matcherRows.length, matcherColumnKey, headers, matcherSelections])
+
+  const openMatcherTab = useCallback(() => {
+    setActiveTab('aiResults')
+    setAiResultsSubTab('matcher')
+  }, [])
+
+  const handleMatcherToolbarClick = useCallback(() => {
+    openMatcherTab()
+    void handleRunMatcher()
+  }, [openMatcherTab, handleRunMatcher])
 
   const aiResultsContacts = useMemo(() => {
     if (!companyColumnKey || matchingCompanyNames.length === 0) return []
@@ -202,6 +353,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
         return cell && matchedNames.includes(cell)
       })
       setPersistedAiResultRows(matchedRows)
+      setAiResultsSubTab('normalizer')
       setActiveTab('aiResults')
       setTimeout(() => setAiSearchLoading(false), 1200)
     } catch (e) {
@@ -244,7 +396,15 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     downloadCsv(contacts, headers, `${base}-${date}.csv`)
   }, [contacts, headers, fileName])
 
-  const hasFile = contacts.length > 0
+  const hasContacts = contacts.length > 0
+  const hasCompanies = companies.length > 0
+
+  const openUpload = useCallback((kind: UploadImportKind) => {
+    setUploadImportKind(kind)
+    if (kind === 'contacts') setParseError(null)
+    else setCompanyParseError(null)
+    setUploadDialogOpen(true)
+  }, [])
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', width: '100%' }}>
@@ -260,9 +420,10 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
       </AppBar>
 
       <UploadDropZone
-        open={uploadOpen}
-        onClose={() => setUploadOpen(false)}
-        onFileAccepted={handleFileAccepted}
+        open={uploadDialogOpen}
+        onClose={() => setUploadDialogOpen(false)}
+        variant={uploadImportKind}
+        onFileAccepted={uploadImportKind === 'contacts' ? handleContactsFileAccepted : handleCompanyFileAccepted}
       />
 
       <Dialog open={aiSearchLoading} disableEscapeKeyDown maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 2 }, 'data-testid': 'llm-search-dialog' } as object}>
@@ -320,13 +481,18 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
       </Dialog>
 
       <Container maxWidth="xl" sx={{ flex: 1, display: 'flex', flexDirection: 'column', py: 2, minHeight: 0, overflow: 'auto', position: 'relative' }} data-testid="main-content">
-        {parseError && (
+        {!hasContacts && !hasCompanies && parseError && (
           <Alert severity="error" onClose={() => setParseError(null)} sx={{ mb: 2 }}>
             {parseError}
           </Alert>
         )}
+        {!hasContacts && !hasCompanies && companyParseError && (
+          <Alert severity="error" onClose={() => setCompanyParseError(null)} sx={{ mb: 2 }}>
+            {companyParseError}
+          </Alert>
+        )}
 
-        {!hasFile && (
+        {!hasContacts && !hasCompanies && (
           <Box
             sx={{
               position: 'fixed',
@@ -347,7 +513,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
               sx={{
                 textAlign: 'center',
                 p: 4,
-                maxWidth: 480,
+                maxWidth: 520,
                 width: '100%',
                 borderRadius: 2,
                 bgcolor: 'background.paper',
@@ -358,30 +524,87 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                 Get started
               </Typography>
               <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-                Upload a CSV or Excel file with contacts (Name, Email, Company, etc.).
+                Import contacts (standard or legacy CSV/Excel) and optionally a companies file. You can upload either one first.
               </Typography>
-              <Button
-                variant="contained"
-                size="large"
-                startIcon={<UploadFileIcon />}
-                onClick={() => setUploadOpen(true)}
-                sx={{ minWidth: 160 }}
-                data-testid="upload-trigger"
-              >
-                Upload file
-              </Button>
+              <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <Button
+                  variant="contained"
+                  size="large"
+                  startIcon={<UploadFileIcon />}
+                  onClick={() => openUpload('contacts')}
+                  sx={{ minWidth: 180 }}
+                  data-testid="upload-trigger-contacts"
+                >
+                  Import contacts
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="large"
+                  startIcon={<UploadFileIcon />}
+                  onClick={() => openUpload('companies')}
+                  sx={{ minWidth: 180 }}
+                  data-testid="upload-trigger-companies"
+                >
+                  Import companies
+                </Button>
+              </Box>
             </Paper>
           </Box>
         )}
 
-        {hasFile && (
+        {hasCompanies && !hasContacts && (
           <>
+            {companyParseError && (
+              <Alert severity="error" onClose={() => setCompanyParseError(null)} sx={{ mb: 2 }}>
+                {companyParseError}
+              </Alert>
+            )}
+            {parseError && (
+              <Alert severity="error" onClose={() => setParseError(null)} sx={{ mb: 2 }}>
+                {parseError}
+              </Alert>
+            )}
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              {companyFileName} — {companies.length.toLocaleString()} company row{companies.length !== 1 ? 's' : ''}
+            </Typography>
+            <Typography variant="body1" color="text.primary" sx={{ mb: 2 }}>
+              Upload a contacts file to use Contact Company Normalizer and the full workspace.
+            </Typography>
+            <Box sx={{ mb: 2 }}>
+              <Button variant="contained" startIcon={<UploadFileIcon />} onClick={() => openUpload('contacts')} data-testid="upload-contacts-from-companies-only">
+                Import contacts
+              </Button>
+            </Box>
+            <AgCompaniesGrid companies={companies} headers={companyHeaders} maxHeight={560} />
+          </>
+        )}
+
+        {hasContacts && (
+          <>
+            {parseError && (
+              <Alert severity="error" onClose={() => setParseError(null)} sx={{ mb: 2 }}>
+                {parseError}
+              </Alert>
+            )}
+            {companyParseError && (
+              <Alert severity="error" onClose={() => setCompanyParseError(null)} sx={{ mb: 2 }}>
+                {companyParseError}
+              </Alert>
+            )}
             <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 2, bgcolor: 'background.default' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
                 <Typography variant="body2" color="text.secondary">
                   {fileName} — {contacts.length.toLocaleString()} rows
                   {companyColumnKey ? ` · Company column: "${companyColumnKey}"` : ' · No company column'}
                 </Typography>
+                {hasCompanies && companyFileName && (
+                  <Typography variant="body2" color="text.secondary">
+                    Companies: {companyFileName} — {companies.length.toLocaleString()} row{companies.length !== 1 ? 's' : ''}
+                  </Typography>
+                )}
+                <Button variant="outlined" size="small" startIcon={<UploadFileIcon />} onClick={() => openUpload('companies')} data-testid="import-companies-toolbar">
+                  {hasCompanies ? 'Replace companies' : 'Import companies'}
+                </Button>
                 <CompanySelect
                   contacts={contacts}
                   companyColumnKey={companyColumnKey}
@@ -395,10 +618,28 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                   startIcon={aiSearchLoading ? <CircularProgress size={18} color="inherit" /> : <SearchIcon />}
                   onClick={handleAiSearch}
                   disabled={!effectiveCompany || !companyColumnKey || aiSearchLoading}
-                  data-testid="ai-search-button"
+                  data-testid="contact-company-normalizer-button"
                 >
-                  AI Search
+                  Contact Company Normalizer
                 </Button>
+                <Tooltip
+                  title={
+                    matcherCanRun
+                      ? 'Open the Matcher tab and run matching against your companies list.'
+                      : 'Import a companies file and ensure contacts include a company column.'
+                  }
+                >
+                  <span>
+                    <Button
+                      variant="outlined"
+                      disabled={!matcherCanRun || matcherRunning}
+                      onClick={handleMatcherToolbarClick}
+                      data-testid="contact-company-matcher-button"
+                    >
+                      Contact Company Matcher
+                    </Button>
+                  </span>
+                </Tooltip>
               </Box>
             </Paper>
 
@@ -408,9 +649,10 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
               </Alert>
             )}
 
-            <Tabs value={activeTab} onChange={(_, v: TabValue) => setActiveTab(v)} sx={{ mb: 2, minHeight: 48 }} textColor="primary" indicatorColor="primary" data-testid="tabs-contacts-ai">
+            <Tabs value={activeTab} onChange={(_, v: TabValue) => setActiveTab(v)} sx={{ mb: 2, minHeight: 48 }} textColor="primary" indicatorColor="primary" data-testid="tabs-main">
               <Tab label="Contacts" value="contacts" data-testid="tab-contacts" />
-              <Tab label="AI Results" value="aiResults" data-testid="tab-ai-results" />
+              <Tab label="Companies" value="companies" data-testid="tab-companies" />
+              <Tab label="Results" value="aiResults" data-testid="tab-results" />
             </Tabs>
 
             {activeTab === 'contacts' && (
@@ -429,7 +671,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                     Export list
                   </Button>
                 </Box>
-                <ContactsTable
+                <AgContactsGrid
                   contacts={contacts}
                   headers={headers}
                   maxHeight={520}
@@ -439,148 +681,208 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
               </Box>
             )}
 
-            {activeTab === 'aiResults' && (
+            {activeTab === 'companies' && (
               <Box>
-                {matchingCompanyNames.length === 0 ? (
-                  <Box sx={{ py: 4 }}>
-                    <Typography color="text.secondary">
-                      Select a company and click AI Search to see matching contacts here.
+                {!hasCompanies ? (
+                  <Box sx={{ py: 2 }}>
+                    <Typography color="text.secondary" sx={{ mb: 2 }}>
+                      No companies file loaded yet.
                     </Typography>
+                    <Button variant="contained" startIcon={<UploadFileIcon />} onClick={() => openUpload('companies')}>
+                      Import companies
+                    </Button>
                   </Box>
                 ) : (
                   <>
-                    <Typography variant="subtitle2" color="primary" sx={{ mb: 2 }}>
-                      {displayedAiResultRows.length.toLocaleString()} contacts matching your search.
+                    <Typography variant="subtitle2" color="primary" sx={{ mb: 1 }}>
+                      {companyFileName} — {companies.length.toLocaleString()} row{companies.length !== 1 ? 's' : ''}
                     </Typography>
-                    {reasoningSteps != null && reasoningSteps.length > 0 && (
-                      <Accordion defaultExpanded={false} sx={{ mb: 2, borderRadius: 2, '&:before': { display: 'none' }, border: 1, borderColor: 'divider' }}>
-                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                          <Typography variant="subtitle2" color="primary">
-                            How the agent matched
-                          </Typography>
-                        </AccordionSummary>
-                        <AccordionDetails sx={{ pt: 0 }}>
-                          <List dense disablePadding>
-                            {reasoningSteps.map((step, i) => (
-                              <ListItem key={i} sx={{ py: 0.25, display: 'block' }}>
-                                <Typography variant="body2" fontWeight={600} component="span">
-                                  {step.title}
-                                </Typography>
-                                {step.detail && (
-                                  <Typography variant="body2" color="text.secondary" component="span" sx={{ ml: 0.5 }}>
-                                    — {step.detail}
-                                  </Typography>
-                                )}
-                              </ListItem>
-                            ))}
-                          </List>
-                        </AccordionDetails>
-                      </Accordion>
-                    )}
-                    <Accordion defaultExpanded={false} sx={{ mb: 2, borderRadius: 2, '&:before': { display: 'none' }, border: 1, borderColor: 'divider' }}>
-                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                        <Typography variant="subtitle2" color="primary">
-                          List entries matched to parent company
+                    <AgCompaniesGrid companies={companies} headers={companyHeaders} maxHeight={520} />
+                  </>
+                )}
+              </Box>
+            )}
+
+            {activeTab === 'aiResults' && (
+              <Box>
+                <Tabs
+                  value={aiResultsSubTab}
+                  onChange={(_, v: AiResultsSubTab) => setAiResultsSubTab(v)}
+                  sx={{ mb: 2, minHeight: 44, borderBottom: 1, borderColor: 'divider' }}
+                  textColor="primary"
+                  indicatorColor="primary"
+                  data-testid="tabs-results-sub"
+                >
+                  <Tab
+                    label="Contact Company Normalizer"
+                    value="normalizer"
+                    data-testid="tab-results-normalizer"
+                  />
+                  <Tab label="Contact Company Matcher" value="matcher" data-testid="tab-results-matcher" />
+                </Tabs>
+
+                {aiResultsSubTab === 'normalizer' && (
+                  <>
+                    {matchingCompanyNames.length === 0 ? (
+                      <Box sx={{ py: 4 }}>
+                        <Typography color="text.secondary">
+                          Select a company and run Contact Company Normalizer to see matching contacts here.
                         </Typography>
-                      </AccordionSummary>
-                      <AccordionDetails sx={{ pt: 0 }}>
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                          {matchingCompanyNames.length} string(s) from your upload that the LLM matched to the parent company. These are not company names—they are the imported data (variants, misspellings, brand names as entered) that will be normalized to the parent.
+                      </Box>
+                    ) : (
+                      <>
+                        <Typography variant="subtitle2" color="primary" sx={{ mb: 2 }}>
+                          {displayedAiResultRows.length.toLocaleString()} contacts matching your search.
                         </Typography>
-                        <List dense sx={{ maxHeight: 200, overflowY: 'scroll' }}>
-                          {(() => {
-                            const excludedSet = new Set(excludedMatchNames)
-                            return [...matchingCompanyNames].sort((a, b) => a.localeCompare(b)).map((name) => {
-                              const included = !excludedSet.has(name)
-                              return (
-                              <ListItem
-                                key={name}
-                                sx={{ py: 0 }}
-                                disablePadding
-                              >
-                                <Checkbox
-                                  size="small"
-                                  checked={included}
-                                  onChange={() => {
-                                    setExcludedMatchNames((prev) =>
-                                      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
-                                    )
-                                  }}
-                                  sx={{ py: 0, mr: 1 }}
-                                />
-                                <ListItemText primary={name} primaryTypographyProps={{ variant: 'body2' }} />
-                              </ListItem>
-                              )
-                            })
-                          })()}
-                        </List>
-                      </AccordionDetails>
-                    </Accordion>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap' }}>
-                      <TextField
-                        size="small"
-                        label="Set company name for all results"
-                        placeholder="e.g. Apple Inc."
-                        value={companyNameOverrideInput}
-                        onChange={(e) => setCompanyNameOverrideInput(e.target.value)}
-                        sx={{ minWidth: 280, flex: 1 }}
-                      />
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={() => {
-                          const v = companyNameOverrideInput.trim()
-                          setOverrideCompanyName(v || null)
-                        }}
-                      >
-                        Apply
-                      </Button>
-                    </Box>
-                    <Box sx={{ mt: 2 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 1 }}>
-                        <Typography variant="subtitle2" color="primary">
-                          Results table — {aiResultsContactsWithDescription.length.toLocaleString()} row{aiResultsContactsWithDescription.length !== 1 ? 's' : ''}
-                        </Typography>
-                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                          <Button
-                            variant="contained"
+                        {reasoningSteps != null && reasoningSteps.length > 0 && (
+                          <Accordion defaultExpanded={false} sx={{ mb: 2, borderRadius: 2, '&:before': { display: 'none' }, border: 1, borderColor: 'divider' }}>
+                            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                              <Typography variant="subtitle2" color="primary">
+                                How the agent matched
+                              </Typography>
+                            </AccordionSummary>
+                            <AccordionDetails sx={{ pt: 0 }}>
+                              <List dense disablePadding>
+                                {reasoningSteps.map((step, i) => (
+                                  <ListItem key={i} sx={{ py: 0.25, display: 'block' }}>
+                                    <Typography variant="body2" fontWeight={600} component="span">
+                                      {step.title}
+                                    </Typography>
+                                    {step.detail && (
+                                      <Typography variant="body2" color="text.secondary" component="span" sx={{ ml: 0.5 }}>
+                                        — {step.detail}
+                                      </Typography>
+                                    )}
+                                  </ListItem>
+                                ))}
+                              </List>
+                            </AccordionDetails>
+                          </Accordion>
+                        )}
+                        <Accordion defaultExpanded={false} sx={{ mb: 2, borderRadius: 2, '&:before': { display: 'none' }, border: 1, borderColor: 'divider' }}>
+                          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                            <Typography variant="subtitle2" color="primary">
+                              List entries matched to parent company
+                            </Typography>
+                          </AccordionSummary>
+                          <AccordionDetails sx={{ pt: 0 }}>
+                            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                              {matchingCompanyNames.length} string(s) from your upload that the LLM matched to the parent company. These are not company names—they are the imported data (variants, misspellings, brand names as entered) that will be normalized to the parent.
+                            </Typography>
+                            <List dense sx={{ maxHeight: 200, overflowY: 'scroll' }}>
+                              {(() => {
+                                const excludedSet = new Set(excludedMatchNames)
+                                return [...matchingCompanyNames].sort((a, b) => a.localeCompare(b)).map((name) => {
+                                  const included = !excludedSet.has(name)
+                                  return (
+                                  <ListItem
+                                    key={name}
+                                    sx={{ py: 0 }}
+                                    disablePadding
+                                  >
+                                    <Checkbox
+                                      size="small"
+                                      checked={included}
+                                      onChange={() => {
+                                        setExcludedMatchNames((prev) =>
+                                          prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+                                        )
+                                      }}
+                                      sx={{ py: 0, mr: 1 }}
+                                    />
+                                    <ListItemText primary={name} primaryTypographyProps={{ variant: 'body2' }} />
+                                  </ListItem>
+                                  )
+                                })
+                              })()}
+                            </List>
+                          </AccordionDetails>
+                        </Accordion>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+                          <TextField
                             size="small"
-                            startIcon={<DownloadIcon />}
-                            onClick={handleExportResults}
-                            data-testid="export-results-button"
-                          >
-                            Export results
-                          </Button>
-                          <CrmExportFeature
-                            contacts={aiResultsContactsWithDescription}
-                            headers={aiResultsHeaders}
+                            label="Set company name for all results"
+                            placeholder="e.g. Apple Inc."
+                            value={companyNameOverrideInput}
+                            onChange={(e) => setCompanyNameOverrideInput(e.target.value)}
+                            sx={{ minWidth: 280, flex: 1 }}
                           />
                           <Button
                             variant="outlined"
                             size="small"
-                            onClick={handleRemoveResultsFromImport}
-                            data-testid="remove-from-import-button"
+                            onClick={() => {
+                              const v = companyNameOverrideInput.trim()
+                              setOverrideCompanyName(v || null)
+                            }}
                           >
-                            Remove records from Import List
+                            Apply
                           </Button>
                         </Box>
-                      </Box>
-                      {exportError && (
-                        <Alert severity="error" onClose={() => setExportError(null)} sx={{ mb: 1 }}>
-                          {exportError}
-                        </Alert>
-                      )}
-                      <Box sx={{ minHeight: 440 }}>
-                        <ContactsTable
-                          contacts={aiResultsContactsWithDescription}
-                          headers={aiResultsHeaders}
-                          maxHeight={420}
-                          companyColumnKey={companyColumnKey}
-                          entityColumnKey={entityColumnKey}
-                        />
-                      </Box>
-                    </Box>
+                        <Box sx={{ mt: 2 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 1 }}>
+                            <Typography variant="subtitle2" color="primary">
+                              Results table — {aiResultsContactsWithDescription.length.toLocaleString()} row{aiResultsContactsWithDescription.length !== 1 ? 's' : ''}
+                            </Typography>
+                            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                              <Button
+                                variant="contained"
+                                size="small"
+                                startIcon={<DownloadIcon />}
+                                onClick={handleExportResults}
+                                data-testid="export-results-button"
+                              >
+                                Export results
+                              </Button>
+                              <CrmExportFeature
+                                contacts={aiResultsContactsWithDescription}
+                                headers={aiResultsHeaders}
+                              />
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={handleRemoveResultsFromImport}
+                                data-testid="remove-from-import-button"
+                              >
+                                Remove records from Import List
+                              </Button>
+                            </Box>
+                          </Box>
+                          {exportError && (
+                            <Alert severity="error" onClose={() => setExportError(null)} sx={{ mb: 1 }}>
+                              {exportError}
+                            </Alert>
+                          )}
+                          <Box sx={{ minHeight: 440 }}>
+                            <AgContactsGrid
+                              contacts={aiResultsContactsWithDescription}
+                              headers={aiResultsHeaders}
+                              maxHeight={420}
+                              companyColumnKey={companyColumnKey}
+                              entityColumnKey={entityColumnKey}
+                            />
+                          </Box>
+                        </Box>
+                      </>
+                    )}
                   </>
+                )}
+
+                {aiResultsSubTab === 'matcher' && (
+                  <MatcherReviewPanel
+                    canRun={matcherCanRun}
+                    running={matcherRunning}
+                    error={matcherError}
+                    onDismissError={() => setMatcherError(null)}
+                    contacts={contacts}
+                    headers={headers}
+                    companyColumnKey={companyColumnKey}
+                    rows={matcherRows}
+                    canonicalNames={matcherCanonicalNames}
+                    selection={matcherSelections}
+                    onSelectionChange={handleMatcherSelectionChange}
+                    onRun={handleRunMatcher}
+                    onApply={handleApplyMatcher}
+                  />
                 )}
               </Box>
             )}

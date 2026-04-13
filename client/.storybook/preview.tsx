@@ -1,6 +1,7 @@
 import type { Preview } from '@storybook/react'
 import { ThemeProvider, CssBaseline } from '@mui/material'
 import { getAppTheme } from '../src/theme'
+import '../src/agGridSetup'
 import '../src/index.css'
 
 const theme = getAppTheme('light')

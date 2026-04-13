@@ -81,9 +81,11 @@ describe('CrmExportDialog', () => {
   })
 
   it('shows progress indicator during export', async () => {
-    let resolveExport: (val: unknown) => void
+    let resolveExport: (value: Awaited<ReturnType<typeof postCrmExport>>) => void
     vi.mocked(postCrmExport).mockReturnValue(
-      new Promise((resolve) => { resolveExport = resolve })
+      new Promise((resolve) => {
+        resolveExport = resolve
+      })
     )
 
     render(

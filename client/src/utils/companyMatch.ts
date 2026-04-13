@@ -1,0 +1,227 @@
+/**
+ * @file companyMatch.ts
+ * @description Deterministic company-name matching: normalize, blocking index, Jaro–Winkler scoring, tiering.
+ */
+import type { CompanyRow } from './parseFile'
+import {
+  MATCH_BLOCKING_EXPAND_THRESHOLD,
+  MATCH_MAX_CANDIDATES_FULL_SCAN,
+  MATCH_SCORE_GAP,
+  MATCH_SCORE_HIGH,
+  MATCH_SCORE_LOW,
+  MATCH_LLM_TOP_K,
+  MATCHED_COMPANY_HEADER,
+} from '../constants/companyMatch'
+
+export type DeterministicTier = 'auto' | 'ambiguous' | 'needs_llm'
+
+export type DeterministicMatchRow = {
+  raw: string
+  tier: DeterministicTier
+  /** Best suggestion when tier is auto; leading candidate otherwise */
+  best: string | null
+  bestScore: number
+  /** Top scored candidates for review / LLM (canonical Name strings) */
+  topCandidates: { name: string; score: number }[]
+}
+
+/** Jaro similarity (0–1). */
+export function jaro(a: string, b: string): number {
+  if (a === b) return 1
+  if (!a.length || !b.length) return 0
+  const matchWindow = Math.floor(Math.max(a.length, b.length) / 2) - 1
+  if (matchWindow < 0) return 0
+  const aMatches = new Array(a.length).fill(false)
+  const bMatches = new Array(b.length).fill(false)
+  let matches = 0
+  for (let i = 0; i < a.length; i++) {
+    const start = Math.max(0, i - matchWindow)
+    const end = Math.min(i + matchWindow + 1, b.length)
+    for (let j = start; j < end; j++) {
+      if (bMatches[j] || a[i] !== b[j]) continue
+      aMatches[i] = true
+      bMatches[j] = true
+      matches++
+      break
+    }
+  }
+  if (matches === 0) return 0
+  let t = 0
+  let k = 0
+  for (let i = 0; i < a.length; i++) {
+    if (!aMatches[i]) continue
+    while (!bMatches[k]) k++
+    if (a[i] !== b[k]) t++
+    k++
+  }
+  t /= 2
+  return (matches / a.length + matches / b.length + (matches - t) / matches) / 3
+}
+
+/** Jaro–Winkler similarity (0–1), prefix boost. */
+export function jaroWinkler(a: string, b: string, p = 0.1): number {
+  const j = jaro(a, b)
+  if (j < 0.7) return j
+  let prefix = 0
+  const maxP = 4
+  for (let i = 0; i < Math.min(maxP, a.length, b.length); i++) {
+    if (a[i] === b[i]) prefix++
+    else break
+  }
+  return j + prefix * p * (1 - j)
+}
+
+export function normalizeForMatch(s: string): string {
+  const t = s.normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ')
+  return t
+}
+
+function blockingKey2(norm: string): string {
+  const alnum = norm.replace(/[^a-z0-9]/g, '')
+  if (alnum.length >= 2) return alnum.slice(0, 2)
+  if (alnum.length === 1) return alnum + '_'
+  return '__'
+}
+
+/** Dedupe canonical company names from import (trim, preserve first-seen casing). */
+export function canonicalNamesFromCompanies(companies: CompanyRow[]): string[] {
+  const lowerSeen = new Set<string>()
+  const out: string[] = []
+  for (const row of companies) {
+    const n = row['Name']
+    if (n == null) continue
+    const t = String(n).trim()
+    if (!t) continue
+    const low = t.toLowerCase()
+    if (lowerSeen.has(low)) continue
+    lowerSeen.add(low)
+    out.push(t)
+  }
+  return out
+}
+
+export function buildBlockingIndex(canonicalNames: string[]): Map<string, string[]> {
+  const map = new Map<string, string[]>()
+  for (const name of canonicalNames) {
+    const k = blockingKey2(normalizeForMatch(name))
+    if (!map.has(k)) map.set(k, [])
+    map.get(k)!.push(name)
+  }
+  return map
+}
+
+function collectCandidates(
+  rawNorm: string,
+  canonicalNames: string[],
+  index: Map<string, string[]>
+): string[] {
+  const k2 = blockingKey2(rawNorm)
+  let pool = new Set<string>(index.get(k2) ?? [])
+  if (pool.size < MATCH_BLOCKING_EXPAND_THRESHOLD && rawNorm.length > 0) {
+    const ch = rawNorm.replace(/[^a-z0-9]/g, '').charAt(0)
+    if (ch) {
+      for (const name of canonicalNames) {
+        const n = normalizeForMatch(name).replace(/[^a-z0-9]/g, '')
+        if (n.startsWith(ch)) pool.add(name)
+      }
+    }
+  }
+  if (pool.size === 0) {
+    return canonicalNames.length <= MATCH_MAX_CANDIDATES_FULL_SCAN
+      ? [...canonicalNames]
+      : canonicalNames.slice(0, MATCH_MAX_CANDIDATES_FULL_SCAN)
+  }
+  const arr = [...pool]
+  if (arr.length > MATCH_MAX_CANDIDATES_FULL_SCAN) {
+    arr.sort((a, b) => a.length - b.length)
+    return arr.slice(0, MATCH_MAX_CANDIDATES_FULL_SCAN)
+  }
+  return arr
+}
+
+function scorePair(rawNorm: string, canonical: string): number {
+  const cNorm = normalizeForMatch(canonical)
+  if (rawNorm === cNorm) return 1
+  if (rawNorm.includes(cNorm) || cNorm.includes(rawNorm)) {
+    const base = jaroWinkler(rawNorm, cNorm)
+    return Math.min(1, base + 0.08)
+  }
+  return jaroWinkler(rawNorm, cNorm)
+}
+
+export function scoreRawAgainstCanonicals(
+  raw: string,
+  canonicalNames: string[],
+  index: Map<string, string[]>
+): { name: string; score: number }[] {
+  const rawNorm = normalizeForMatch(raw)
+  const candidates = collectCandidates(rawNorm, canonicalNames, index)
+  const scored = candidates.map((name) => ({ name, score: scorePair(rawNorm, name) }))
+  scored.sort((a, b) => b.score - a.score)
+  return scored
+}
+
+export function tierFromScores(scored: { name: string; score: number }[]): DeterministicTier {
+  if (scored.length === 0) return 'needs_llm'
+  const best = scored[0].score
+  const second = scored.length > 1 ? scored[1].score : 0
+  if (best < MATCH_SCORE_LOW) return 'needs_llm'
+  if (best >= MATCH_SCORE_HIGH && best - second >= MATCH_SCORE_GAP) return 'auto'
+  if (scored.length >= 2 && best - second < MATCH_SCORE_GAP) return 'ambiguous'
+  if (best >= MATCH_SCORE_HIGH) return 'auto'
+  return 'ambiguous'
+}
+
+export function matchDeterministicBatch(
+  raws: string[],
+  canonicalNames: string[]
+): DeterministicMatchRow[] {
+  if (canonicalNames.length === 0) {
+    return raws.map((raw) => ({
+      raw,
+      tier: 'needs_llm' as const,
+      best: null,
+      bestScore: 0,
+      topCandidates: [],
+    }))
+  }
+  const index = buildBlockingIndex(canonicalNames)
+  return raws.map((raw) => {
+    const scored = scoreRawAgainstCanonicals(raw, canonicalNames, index)
+    const tier = tierFromScores(scored)
+    const top = scored.slice(0, Math.max(MATCH_LLM_TOP_K, 5))
+    const best = scored[0] ?? null
+    return {
+      raw,
+      tier,
+      best: best ? best.name : null,
+      bestScore: best ? best.score : 0,
+      topCandidates: top,
+    }
+  })
+}
+
+export function topKForLlm(row: DeterministicMatchRow): string[] {
+  const names = row.topCandidates.map((c) => c.name)
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const n of names) {
+    if (seen.has(n)) continue
+    seen.add(n)
+    out.push(n)
+    if (out.length >= MATCH_LLM_TOP_K) break
+  }
+  return out
+}
+
+/**
+ * First free header for matcher output: `Matched Company`, or `Matched Company 2`, etc.
+ * Callers that need a stable key across re-runs should store the result once (e.g. in React state).
+ */
+export function pickMatchedCompanyHeader(existingHeaders: string[]): string {
+  const base = MATCHED_COMPANY_HEADER
+  if (!existingHeaders.includes(base)) return base
+  let i = 2
+  while (existingHeaders.includes(`${base} ${i}`)) i++
+  return `${base} ${i}`
+}

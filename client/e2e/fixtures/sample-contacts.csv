@@ -1,4 +1,4 @@
-Name,Email,Company
-Alice Smith,alice@acme.com,Acme Inc
-Bob Jones,bob@acme.com,Acme Inc
-Carol Lee,carol@globex.com,Globex Corp
+First,Last,Company,Title,Email,City,State,Zip,Country
+Alice,Smith,Acme Inc,Engineer,alice@acme.com,Boston,MA,02101,USA
+Bob,Jones,Acme Inc,Manager,bob@acme.com,Boston,MA,02102,USA
+Carol,Lee,Globex Corp,Director,carol@globex.com,NYC,NY,10001,USA

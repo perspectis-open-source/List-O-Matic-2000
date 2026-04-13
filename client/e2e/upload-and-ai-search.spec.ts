@@ -1,6 +1,6 @@
 /**
  * @file upload-and-ai-search.spec.ts
- * @description Playwright E2E: upload CSV, AI Search with mocked API, export, remove records, persisted results.
+ * @description Playwright E2E: upload CSV, Contact Company Normalizer with mocked API, export, remove records, persisted results.
  * @module List-O-Matic-2000/client/e2e
  */
 import { test, expect } from '@playwright/test'
@@ -15,14 +15,14 @@ const mockChatResponse = {
   reasoningSteps: [],
 }
 
-test.describe('Upload and AI Search flow', () => {
-  test('upload CSV and see contacts; AI Search with mocked API shows results', async ({
+test.describe('Upload and Contact Company Normalizer flow', () => {
+  test('upload CSV and see contacts; Normalizer with mocked API shows results', async ({
     page,
   }) => {
     await page.goto('/')
 
-    await expect(page.getByTestId('upload-trigger')).toBeVisible()
-    await page.getByTestId('upload-trigger').click()
+    await expect(page.getByTestId('upload-trigger-contacts')).toBeVisible()
+    await page.getByTestId('upload-trigger-contacts').click()
 
     const fileInput = page.getByRole('dialog').locator('input[type="file"]')
     await expect(fileInput).toBeVisible()
@@ -36,7 +36,7 @@ test.describe('Upload and AI Search flow', () => {
     await page.getByTestId('company-select-input').click()
     await page.getByRole('option', { name: 'Acme Inc' }).click()
 
-    await expect(page.getByTestId('ai-search-button')).toBeEnabled()
+    await expect(page.getByTestId('contact-company-normalizer-button')).toBeEnabled()
 
     await page.route('**/api/chat', async (route) => {
       await route.fulfill({
@@ -46,17 +46,17 @@ test.describe('Upload and AI Search flow', () => {
       })
     })
 
-    await page.getByTestId('ai-search-button').click()
+    await page.getByTestId('contact-company-normalizer-button').click()
 
-    await expect(page.getByRole('tab', { name: 'AI Results' })).toBeVisible()
-    await page.getByRole('tab', { name: 'AI Results' }).click()
+    await expect(page.getByRole('tab', { name: 'Results' })).toBeVisible()
+    await page.getByRole('tab', { name: 'Results' }).click()
     await expect(page.getByText(/contacts matching your search/)).toBeVisible({ timeout: 10000 })
     await expect(page.getByTestId('export-results-button')).toBeVisible()
   })
 
   test('Contacts tab shows Export list button after upload', async ({ page }) => {
     await page.goto('/')
-    await page.getByTestId('upload-trigger').click()
+    await page.getByTestId('upload-trigger-contacts').click()
     const fileInput = page.getByRole('dialog').locator('input[type="file"]')
     await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-contacts.csv'))
     await expect(page.getByTestId('main-content')).toContainText('3 rows')
@@ -69,7 +69,7 @@ test.describe('Upload and AI Search flow', () => {
     page,
   }) => {
     await page.goto('/')
-    await page.getByTestId('upload-trigger').click()
+    await page.getByTestId('upload-trigger-contacts').click()
     const fileInput = page.getByRole('dialog').locator('input[type="file"]')
     await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-contacts.csv'))
     await expect(page.getByTestId('main-content')).toContainText('3 rows')
@@ -83,10 +83,10 @@ test.describe('Upload and AI Search flow', () => {
         body: JSON.stringify(mockChatResponse),
       })
     })
-    await page.getByTestId('ai-search-button').click()
+    await page.getByTestId('contact-company-normalizer-button').click()
 
-    await expect(page.getByRole('tab', { name: 'AI Results' })).toBeVisible({ timeout: 10000 })
-    await page.getByRole('tab', { name: 'AI Results' }).click()
+    await expect(page.getByRole('tab', { name: 'Results' })).toBeVisible({ timeout: 10000 })
+    await page.getByRole('tab', { name: 'Results' }).click()
     await expect(page.getByText(/2 contacts matching your search/)).toBeVisible({ timeout: 5000 })
     await expect(page.getByTestId('remove-from-import-button')).toBeVisible()
     await expect(page.getByTestId('remove-from-import-button')).toContainText('Remove records from Import List')
@@ -96,14 +96,14 @@ test.describe('Upload and AI Search flow', () => {
     await expect(page.getByRole('tab', { name: 'Contacts' })).toBeVisible()
     await expect(page.getByTestId('main-content')).toContainText('1 row')
 
-    await page.getByRole('tab', { name: 'AI Results' }).click()
+    await page.getByRole('tab', { name: 'Results' }).click()
     await expect(page.getByText(/2 contacts matching your search/)).toBeVisible()
     await expect(page.getByTestId('export-results-button')).toBeVisible()
   })
 
   test('LLM search dialog shows warning during search', async ({ page }) => {
     await page.goto('/')
-    await page.getByTestId('upload-trigger').click()
+    await page.getByTestId('upload-trigger-contacts').click()
     const fileInput = page.getByRole('dialog').locator('input[type="file"]')
     await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-contacts.csv'))
     await page.getByTestId('company-select-input').click()
@@ -122,12 +122,27 @@ test.describe('Upload and AI Search flow', () => {
       })
     })
 
-    await page.getByTestId('ai-search-button').click()
+    await page.getByTestId('contact-company-normalizer-button').click()
     const dialog = page.getByTestId('llm-search-dialog')
     await expect(dialog).toBeVisible({ timeout: 3000 })
     await expect(dialog.getByText(/LLM results may be incorrect or inaccurate/)).toBeVisible()
     await expect(dialog.getByText(/Please check results\./)).toBeVisible()
     resolveFulfill!()
-    await expect(page.getByRole('tab', { name: 'AI Results' })).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('tab', { name: 'Results' })).toBeVisible({ timeout: 10000 })
+  })
+
+  test('companies-first: import companies then contacts reaches main workspace', async ({ page }) => {
+    await page.goto('/')
+    await page.getByTestId('upload-trigger-companies').click()
+    const fileInput = page.getByRole('dialog').locator('input[type="file"]')
+    await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-companies.csv'))
+    await expect(page.getByTestId('main-content')).toContainText('sample-companies.csv')
+    await expect(page.getByTestId('companies-table')).toBeVisible()
+    await page.getByTestId('upload-contacts-from-companies-only').click()
+    await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-contacts.csv'))
+    await expect(page.getByTestId('main-content')).toContainText('3 rows')
+    await expect(page.getByTestId('tab-companies')).toBeVisible()
+    await page.getByTestId('tab-companies').click()
+    await expect(page.getByTestId('companies-table')).toBeVisible()
   })
 })

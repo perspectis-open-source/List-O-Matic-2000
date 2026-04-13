@@ -10,7 +10,7 @@ test.describe('Smoke', () => {
     await page.goto('/')
     await expect(page).toHaveTitle(/List-O-Matic 2000/)
     await expect(page.getByTestId('main-content')).toBeVisible()
-    const uploadTrigger = page.getByTestId('upload-trigger')
+    const uploadTrigger = page.getByTestId('upload-trigger-contacts')
     await expect(uploadTrigger).toBeVisible()
   })
 })

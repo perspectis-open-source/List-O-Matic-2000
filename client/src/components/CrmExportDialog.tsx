@@ -36,6 +36,8 @@ const DEFAULT_MAPPINGS: Record<string, string> = {
   email: 'email',
   name: 'full_name',
   'full name': 'full_name',
+  first: 'first_name',
+  last: 'last_name',
   'first name': 'first_name',
   'last name': 'last_name',
   company: 'company_name',
@@ -214,10 +216,9 @@ export function CrmExportDialog({ open, onClose, contacts, headers }: CrmExportD
                   label={header}
                   placeholder="CRM field name (e.g. email, full_name)"
                   value={fieldMapping[header] ?? ''}
-                  onChange={(e) => handleFieldChange(header, e.target.value)}
+                                   onChange={(e) => handleFieldChange(header, e.target.value)}
                   size="small"
                   fullWidth
-                  disabled={exportState === 'exporting'}
                   slotProps={{
                     inputLabel: { shrink: true },
                   }}

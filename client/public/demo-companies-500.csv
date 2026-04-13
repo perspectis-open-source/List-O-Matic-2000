@@ -1,0 +1,501 @@
+Name,Client Number,Open Date,Status,Client Originating Attorney
+Coca-Cola Company,100000,2015-01-01,Active,Morgan Blake
+Colgate-Palmolive,100001,2016-02-02,Active,Jordan Lee
+Costco Wholesale Corporation,100002,2017-03-03,Pending,Riley Chen
+Cadbury plc,100003,2018-04-04,Closed,Taylor Brooks
+Caterpillar Inc.,100004,2019-05-05,On Hold,Casey Nguyen
+Comcast Corporation,100005,2020-06-06,Active,Alex Rivera
+Chevron Corporation,100006,2021-07-07,Active,Sam Okonkwo
+Chrysler LLC,100007,2022-08-08,Pending,Jamie Patel
+Citigroup Inc.,100008,2023-09-09,Closed,Morgan Blake
+Cisco Systems Inc.,100009,2024-10-10,On Hold,Jordan Lee
+Campbell Soup Company,100010,2015-11-11,Active,Riley Chen
+Conagra Brands Inc.,100011,2016-12-12,Active,Taylor Brooks
+Cardinal Health Inc.,100012,2017-01-13,Pending,Casey Nguyen
+Cigna Corporation,100013,2018-02-14,Closed,Alex Rivera
+CVS Health Corporation,100014,2019-03-15,On Hold,Sam Okonkwo
+PepsiCo Inc.,100015,2020-04-16,Active,Jamie Patel
+Unilever plc,100016,2021-05-17,Active,Morgan Blake
+Amazon.com Inc.,100017,2022-06-18,Pending,Jordan Lee
+Microsoft Corporation,100018,2023-07-19,Closed,Riley Chen
+Apple Inc.,100019,2024-08-20,On Hold,Taylor Brooks
+Walmart Inc.,100020,2015-09-21,Active,Casey Nguyen
+Target Corporation,100021,2016-10-22,Active,Alex Rivera
+Ford Motor Company,100022,2017-11-23,Pending,Sam Okonkwo
+The Walt Disney Company,100023,2018-12-24,Closed,Jamie Patel
+Netflix Inc.,100024,2019-01-25,On Hold,Morgan Blake
+3M,100025,2020-02-26,Active,Jordan Lee
+A. O. Smith,100026,2021-03-27,Active,Riley Chen
+Abbott Laboratories,100027,2022-04-28,Pending,Taylor Brooks
+AbbVie,100028,2023-05-01,Closed,Casey Nguyen
+Accenture,100029,2024-06-02,On Hold,Alex Rivera
+Adobe Inc.,100030,2015-07-03,Active,Sam Okonkwo
+Advanced Micro Devices,100031,2016-08-04,Active,Jamie Patel
+AES Corporation,100032,2017-09-05,Pending,Morgan Blake
+Aflac,100033,2018-10-06,Closed,Jordan Lee
+Agilent Technologies,100034,2019-11-07,On Hold,Riley Chen
+Air Products,100035,2020-12-08,Active,Taylor Brooks
+Airbnb,100036,2021-01-09,Active,Casey Nguyen
+Akamai Technologies,100037,2022-02-10,Pending,Alex Rivera
+Albemarle Corporation,100038,2023-03-11,Closed,Sam Okonkwo
+Alexandria Real Estate Equities,100039,2024-04-12,On Hold,Jamie Patel
+Align Technology,100040,2015-05-13,Active,Morgan Blake
+Allegion,100041,2016-06-14,Active,Jordan Lee
+Alliant Energy,100042,2017-07-15,Pending,Riley Chen
+Allstate,100043,2018-08-16,Closed,Taylor Brooks
+Alphabet Inc.,100044,2019-09-17,On Hold,Casey Nguyen
+Altria,100045,2020-10-18,Active,Alex Rivera
+Amcor,100046,2021-11-19,Active,Sam Okonkwo
+Ameren,100047,2022-12-20,Pending,Jamie Patel
+American Electric Power,100048,2023-01-21,Closed,Morgan Blake
+American Express,100049,2024-02-22,On Hold,Jordan Lee
+American International Group,100050,2015-03-23,Active,Riley Chen
+American Tower,100051,2016-04-24,Active,Taylor Brooks
+American Water Works,100052,2017-05-25,Pending,Casey Nguyen
+Ameriprise Financial,100053,2018-06-26,Closed,Alex Rivera
+Ametek,100054,2019-07-27,On Hold,Sam Okonkwo
+Amgen,100055,2020-08-28,Active,Jamie Patel
+Amphenol,100056,2021-09-01,Active,Morgan Blake
+Analog Devices,100057,2022-10-02,Pending,Jordan Lee
+Aon plc,100058,2023-11-03,Closed,Riley Chen
+APA Corporation,100059,2024-12-04,On Hold,Taylor Brooks
+Apollo Global Management,100060,2015-01-05,Active,Casey Nguyen
+Applied Materials,100061,2016-02-06,Active,Alex Rivera
+AppLovin,100062,2017-03-07,Pending,Sam Okonkwo
+Aptiv,100063,2018-04-08,Closed,Jamie Patel
+Arch Capital Group,100064,2019-05-09,On Hold,Morgan Blake
+Archer Daniels Midland,100065,2020-06-10,Active,Jordan Lee
+Ares Management,100066,2021-07-11,Active,Riley Chen
+Arista Networks,100067,2022-08-12,Pending,Taylor Brooks
+Arthur J. Gallagher & Co.,100068,2023-09-13,Closed,Casey Nguyen
+Assurant,100069,2024-10-14,On Hold,Alex Rivera
+AT&T,100070,2015-11-15,Active,Sam Okonkwo
+Atmos Energy,100071,2016-12-16,Active,Jamie Patel
+Autodesk,100072,2017-01-17,Pending,Morgan Blake
+Automatic Data Processing,100073,2018-02-18,Closed,Jordan Lee
+AutoZone,100074,2019-03-19,On Hold,Riley Chen
+AvalonBay Communities,100075,2020-04-20,Active,Taylor Brooks
+Avery Dennison,100076,2021-05-21,Active,Casey Nguyen
+Axon Enterprise,100077,2022-06-22,Pending,Alex Rivera
+Baker Hughes,100078,2023-07-23,Closed,Sam Okonkwo
+Ball Corporation,100079,2024-08-24,On Hold,Jamie Patel
+Bank of America,100080,2015-09-25,Active,Morgan Blake
+Baxter International,100081,2016-10-26,Active,Jordan Lee
+Becton Dickinson,100082,2017-11-27,Pending,Riley Chen
+Berkshire Hathaway,100083,2018-12-28,Closed,Taylor Brooks
+Best Buy,100084,2019-01-01,On Hold,Casey Nguyen
+Bio-Techne,100085,2020-02-02,Active,Alex Rivera
+Biogen,100086,2021-03-03,Active,Sam Okonkwo
+BlackRock,100087,2022-04-04,Pending,Jamie Patel
+Blackstone Inc.,100088,2023-05-05,Closed,Morgan Blake
+"Block, Inc.",100089,2024-06-06,On Hold,Jordan Lee
+BNY Mellon,100090,2015-07-07,Active,Riley Chen
+Boeing,100091,2016-08-08,Active,Taylor Brooks
+Booking Holdings,100092,2017-09-09,Pending,Casey Nguyen
+Boston Scientific,100093,2018-10-10,Closed,Alex Rivera
+Bristol Myers Squibb,100094,2019-11-11,On Hold,Sam Okonkwo
+Broadcom,100095,2020-12-12,Active,Jamie Patel
+Broadridge Financial Solutions,100096,2021-01-13,Active,Morgan Blake
+Brown & Brown,100097,2022-02-14,Pending,Jordan Lee
+Brown–Forman,100098,2023-03-15,Closed,Riley Chen
+Builders FirstSource,100099,2024-04-16,On Hold,Taylor Brooks
+Bunge Global,100100,2015-05-17,Active,Casey Nguyen
+"BXP, Inc.",100101,2016-06-18,Active,Alex Rivera
+C.H. Robinson,100102,2017-07-19,Pending,Sam Okonkwo
+Cadence Design Systems,100103,2018-08-20,Closed,Jamie Patel
+Camden Property Trust,100104,2019-09-21,On Hold,Morgan Blake
+Campbell's Company (The),100105,2020-10-22,Active,Jordan Lee
+Capital One,100106,2021-11-23,Active,Riley Chen
+Carnival,100107,2022-12-24,Pending,Taylor Brooks
+Carrier Global,100108,2023-01-25,Closed,Casey Nguyen
+Carvana,100109,2024-02-26,On Hold,Alex Rivera
+Casey's,100110,2015-03-27,Active,Sam Okonkwo
+Cboe Global Markets,100111,2016-04-28,Active,Jamie Patel
+CBRE Group,100112,2017-05-01,Pending,Morgan Blake
+CDW Corporation,100113,2018-06-02,Closed,Jordan Lee
+Cencora,100114,2019-07-03,On Hold,Riley Chen
+Centene Corporation,100115,2020-08-04,Active,Taylor Brooks
+CenterPoint Energy,100116,2021-09-05,Active,Casey Nguyen
+CF Industries,100117,2022-10-06,Pending,Alex Rivera
+Charles River Laboratories,100118,2023-11-07,Closed,Sam Okonkwo
+Charles Schwab Corporation,100119,2024-12-08,On Hold,Jamie Patel
+Charter Communications,100120,2015-01-09,Active,Morgan Blake
+Chipotle Mexican Grill,100121,2016-02-10,Active,Jordan Lee
+Chubb Limited,100122,2017-03-11,Pending,Riley Chen
+Church & Dwight,100123,2018-04-12,Closed,Taylor Brooks
+Ciena,100124,2019-05-13,On Hold,Casey Nguyen
+Cincinnati Financial,100125,2020-06-14,Active,Alex Rivera
+Cintas,100126,2021-07-15,Active,Sam Okonkwo
+Citizens Financial Group,100127,2022-08-16,Pending,Jamie Patel
+Clorox,100128,2023-09-17,Closed,Morgan Blake
+CME Group,100129,2024-10-18,On Hold,Jordan Lee
+CMS Energy,100130,2015-11-19,Active,Riley Chen
+Coca-Cola Company (The),100131,2016-12-20,Active,Taylor Brooks
+Cognizant,100132,2017-01-21,Pending,Casey Nguyen
+Coherent Corp.,100133,2018-02-22,Closed,Alex Rivera
+Coinbase,100134,2019-03-23,On Hold,Sam Okonkwo
+Comfort Systems USA,100135,2020-04-24,Active,Jamie Patel
+ConocoPhillips,100136,2021-05-25,Active,Morgan Blake
+Consolidated Edison,100137,2022-06-26,Pending,Jordan Lee
+Constellation Brands,100138,2023-07-27,Closed,Riley Chen
+Constellation Energy,100139,2024-08-28,On Hold,Taylor Brooks
+Cooper Companies (The),100140,2015-09-01,Active,Casey Nguyen
+Copart,100141,2016-10-02,Active,Alex Rivera
+Corning Inc.,100142,2017-11-03,Pending,Sam Okonkwo
+Corpay,100143,2018-12-04,Closed,Jamie Patel
+Corteva,100144,2019-01-05,On Hold,Morgan Blake
+CoStar Group,100145,2020-02-06,Active,Jordan Lee
+Coterra,100146,2021-03-07,Active,Riley Chen
+CRH plc,100147,2022-04-08,Pending,Taylor Brooks
+CrowdStrike,100148,2023-05-09,Closed,Casey Nguyen
+Crown Castle,100149,2024-06-10,On Hold,Alex Rivera
+CSX Corporation,100150,2015-07-11,Active,Sam Okonkwo
+Cummins,100151,2016-08-12,Active,Jamie Patel
+Danaher Corporation,100152,2017-09-13,Pending,Morgan Blake
+Darden Restaurants,100153,2018-10-14,Closed,Jordan Lee
+Datadog,100154,2019-11-15,On Hold,Riley Chen
+DaVita,100155,2020-12-16,Active,Taylor Brooks
+Deckers Brands,100156,2021-01-17,Active,Casey Nguyen
+Deere & Company,100157,2022-02-18,Pending,Alex Rivera
+Dell Technologies,100158,2023-03-19,Closed,Sam Okonkwo
+Delta Air Lines,100159,2024-04-20,On Hold,Jamie Patel
+Devon Energy,100160,2015-05-21,Active,Morgan Blake
+Dexcom,100161,2016-06-22,Active,Jordan Lee
+Diamondback Energy,100162,2017-07-23,Pending,Riley Chen
+Digital Realty,100163,2018-08-24,Closed,Taylor Brooks
+Dollar General,100164,2019-09-25,On Hold,Casey Nguyen
+Dollar Tree,100165,2020-10-26,Active,Alex Rivera
+Dominion Energy,100166,2021-11-27,Active,Sam Okonkwo
+Domino's,100167,2022-12-28,Pending,Jamie Patel
+DoorDash,100168,2023-01-01,Closed,Morgan Blake
+Dover Corporation,100169,2024-02-02,On Hold,Jordan Lee
+Dow Inc.,100170,2015-03-03,Active,Riley Chen
+D. R. Horton,100171,2016-04-04,Active,Taylor Brooks
+DTE Energy,100172,2017-05-05,Pending,Casey Nguyen
+Duke Energy,100173,2018-06-06,Closed,Alex Rivera
+DuPont,100174,2019-07-07,On Hold,Sam Okonkwo
+Eaton Corporation,100175,2020-08-08,Active,Jamie Patel
+eBay Inc.,100176,2021-09-09,Active,Morgan Blake
+EchoStar,100177,2022-10-10,Pending,Jordan Lee
+Ecolab,100178,2023-11-11,Closed,Riley Chen
+Edison International,100179,2024-12-12,On Hold,Taylor Brooks
+Edwards Lifesciences,100180,2015-01-13,Active,Casey Nguyen
+Electronic Arts,100181,2016-02-14,Active,Alex Rivera
+Elevance Health,100182,2017-03-15,Pending,Sam Okonkwo
+Emcor,100183,2018-04-16,Closed,Jamie Patel
+Emerson Electric,100184,2019-05-17,On Hold,Morgan Blake
+Entergy,100185,2020-06-18,Active,Jordan Lee
+EOG Resources,100186,2021-07-19,Active,Riley Chen
+EPAM Systems,100187,2022-08-20,Pending,Taylor Brooks
+EQT Corporation,100188,2023-09-21,Closed,Casey Nguyen
+Equifax,100189,2024-10-22,On Hold,Alex Rivera
+Equinix,100190,2015-11-23,Active,Sam Okonkwo
+Equity Residential,100191,2016-12-24,Active,Jamie Patel
+Erie Indemnity,100192,2017-01-25,Pending,Morgan Blake
+Essex Property Trust,100193,2018-02-26,Closed,Jordan Lee
+Estée Lauder Companies (The),100194,2019-03-27,On Hold,Riley Chen
+Everest Group,100195,2020-04-28,Active,Taylor Brooks
+Evergy,100196,2021-05-01,Active,Casey Nguyen
+Eversource Energy,100197,2022-06-02,Pending,Alex Rivera
+Exelon,100198,2023-07-03,Closed,Sam Okonkwo
+Expand Energy,100199,2024-08-04,On Hold,Jamie Patel
+Expedia Group,100200,2015-09-05,Active,Morgan Blake
+Expeditors International,100201,2016-10-06,Active,Jordan Lee
+Extra Space Storage,100202,2017-11-07,Pending,Riley Chen
+ExxonMobil,100203,2018-12-08,Closed,Taylor Brooks
+"F5, Inc.",100204,2019-01-09,On Hold,Casey Nguyen
+FactSet,100205,2020-02-10,Active,Alex Rivera
+Fair Isaac,100206,2021-03-11,Active,Sam Okonkwo
+Fastenal,100207,2022-04-12,Pending,Jamie Patel
+Federal Realty Investment Trust,100208,2023-05-13,Closed,Morgan Blake
+FedEx,100209,2024-06-14,On Hold,Jordan Lee
+Fidelity National Information Services,100210,2015-07-15,Active,Riley Chen
+Fifth Third Bancorp,100211,2016-08-16,Active,Taylor Brooks
+First Solar,100212,2017-09-17,Pending,Casey Nguyen
+FirstEnergy,100213,2018-10-18,Closed,Alex Rivera
+Fiserv,100214,2019-11-19,On Hold,Sam Okonkwo
+Fortinet,100215,2020-12-20,Active,Jamie Patel
+Fortive,100216,2021-01-21,Active,Morgan Blake
+Fox Corporation,100217,2022-02-22,Pending,Jordan Lee
+Fox Corporation (Class B),100218,2023-03-23,Closed,Riley Chen
+Franklin Resources,100219,2024-04-24,On Hold,Taylor Brooks
+Freeport-McMoRan,100220,2015-05-25,Active,Casey Nguyen
+Garmin,100221,2016-06-26,Active,Alex Rivera
+Gartner,100222,2017-07-27,Pending,Sam Okonkwo
+GE Aerospace,100223,2018-08-28,Closed,Jamie Patel
+GE HealthCare,100224,2019-09-01,On Hold,Morgan Blake
+GE Vernova,100225,2020-10-02,Active,Jordan Lee
+Gen Digital,100226,2021-11-03,Active,Riley Chen
+Generac,100227,2022-12-04,Pending,Taylor Brooks
+General Dynamics,100228,2023-01-05,Closed,Casey Nguyen
+General Mills,100229,2024-02-06,On Hold,Alex Rivera
+General Motors,100230,2015-03-07,Active,Sam Okonkwo
+Genuine Parts Company,100231,2016-04-08,Active,Jamie Patel
+Gilead Sciences,100232,2017-05-09,Pending,Morgan Blake
+Global Payments,100233,2018-06-10,Closed,Jordan Lee
+Globe Life,100234,2019-07-11,On Hold,Riley Chen
+GoDaddy,100235,2020-08-12,Active,Taylor Brooks
+Goldman Sachs,100236,2021-09-13,Active,Casey Nguyen
+Halliburton,100237,2022-10-14,Pending,Alex Rivera
+Hartford (The),100238,2023-11-15,Closed,Sam Okonkwo
+Hasbro,100239,2024-12-16,On Hold,Jamie Patel
+HCA Healthcare,100240,2015-01-17,Active,Morgan Blake
+Healthpeak Properties,100241,2016-02-18,Active,Jordan Lee
+Henry Schein,100242,2017-03-19,Pending,Riley Chen
+Hershey Company (The),100243,2018-04-20,Closed,Taylor Brooks
+Hewlett Packard Enterprise,100244,2019-05-21,On Hold,Casey Nguyen
+Hilton Worldwide,100245,2020-06-22,Active,Alex Rivera
+Home Depot (The),100246,2021-07-23,Active,Sam Okonkwo
+Honeywell,100247,2022-08-24,Pending,Jamie Patel
+Hormel Foods,100248,2023-09-25,Closed,Morgan Blake
+Host Hotels & Resorts,100249,2024-10-26,On Hold,Jordan Lee
+Howmet Aerospace,100250,2015-11-27,Active,Riley Chen
+HP Inc.,100251,2016-12-28,Active,Taylor Brooks
+Hubbell Incorporated,100252,2017-01-01,Pending,Casey Nguyen
+Humana,100253,2018-02-02,Closed,Alex Rivera
+Huntington Bancshares,100254,2019-03-03,On Hold,Sam Okonkwo
+Huntington Ingalls Industries,100255,2020-04-04,Active,Jamie Patel
+IBM,100256,2021-05-05,Active,Morgan Blake
+IDEX Corporation,100257,2022-06-06,Pending,Jordan Lee
+Idexx Laboratories,100258,2023-07-07,Closed,Riley Chen
+Illinois Tool Works,100259,2024-08-08,On Hold,Taylor Brooks
+Incyte,100260,2015-09-09,Active,Casey Nguyen
+Ingersoll Rand,100261,2016-10-10,Active,Alex Rivera
+Insulet Corporation,100262,2017-11-11,Pending,Sam Okonkwo
+Intel,100263,2018-12-12,Closed,Jamie Patel
+Interactive Brokers,100264,2019-01-13,On Hold,Morgan Blake
+Intercontinental Exchange,100265,2020-02-14,Active,Jordan Lee
+International Flavors & Fragrances,100266,2021-03-15,Active,Riley Chen
+International Paper,100267,2022-04-16,Pending,Taylor Brooks
+Intuit,100268,2023-05-17,Closed,Casey Nguyen
+Intuitive Surgical,100269,2024-06-18,On Hold,Alex Rivera
+Invesco,100270,2015-07-19,Active,Sam Okonkwo
+Invitation Homes,100271,2016-08-20,Active,Jamie Patel
+IQVIA,100272,2017-09-21,Pending,Morgan Blake
+Iron Mountain,100273,2018-10-22,Closed,Jordan Lee
+J.B. Hunt,100274,2019-11-23,On Hold,Riley Chen
+Jabil,100275,2020-12-24,Active,Taylor Brooks
+Jack Henry & Associates,100276,2021-01-25,Active,Casey Nguyen
+Jacobs Solutions,100277,2022-02-26,Pending,Alex Rivera
+Johnson & Johnson,100278,2023-03-27,Closed,Sam Okonkwo
+Johnson Controls,100279,2024-04-28,On Hold,Jamie Patel
+JPMorgan Chase,100280,2015-05-01,Active,Morgan Blake
+Kenvue,100281,2016-06-02,Active,Jordan Lee
+Keurig Dr Pepper,100282,2017-07-03,Pending,Riley Chen
+KeyCorp,100283,2018-08-04,Closed,Taylor Brooks
+Keysight Technologies,100284,2019-09-05,On Hold,Casey Nguyen
+Kimberly-Clark,100285,2020-10-06,Active,Alex Rivera
+Kimco Realty,100286,2021-11-07,Active,Sam Okonkwo
+Kinder Morgan,100287,2022-12-08,Pending,Jamie Patel
+KKR & Co.,100288,2023-01-09,Closed,Morgan Blake
+KLA Corporation,100289,2024-02-10,On Hold,Jordan Lee
+Kraft Heinz,100290,2015-03-11,Active,Riley Chen
+Kroger,100291,2016-04-12,Active,Taylor Brooks
+L3Harris,100292,2017-05-13,Pending,Casey Nguyen
+Labcorp,100293,2018-06-14,Closed,Alex Rivera
+Lam Research,100294,2019-07-15,On Hold,Sam Okonkwo
+Las Vegas Sands,100295,2020-08-16,Active,Jamie Patel
+Leidos,100296,2021-09-17,Active,Morgan Blake
+Lennar,100297,2022-10-18,Pending,Jordan Lee
+Lennox International,100298,2023-11-19,Closed,Riley Chen
+Lilly (Eli),100299,2024-12-20,On Hold,Taylor Brooks
+Linde plc,100300,2015-01-21,Active,Casey Nguyen
+Live Nation Entertainment,100301,2016-02-22,Active,Alex Rivera
+Lockheed Martin,100302,2017-03-23,Pending,Sam Okonkwo
+Loews Corporation,100303,2018-04-24,Closed,Jamie Patel
+Lowe's,100304,2019-05-25,On Hold,Morgan Blake
+Lululemon Athletica,100305,2020-06-26,Active,Jordan Lee
+Lumentum,100306,2021-07-27,Active,Riley Chen
+LyondellBasell,100307,2022-08-28,Pending,Taylor Brooks
+M&T Bank,100308,2023-09-01,Closed,Casey Nguyen
+Marathon Petroleum,100309,2024-10-02,On Hold,Alex Rivera
+Marriott International,100310,2015-11-03,Active,Sam Okonkwo
+Marsh McLennan,100311,2016-12-04,Active,Jamie Patel
+Martin Marietta Materials,100312,2017-01-05,Pending,Morgan Blake
+Masco,100313,2018-02-06,Closed,Jordan Lee
+Mastercard,100314,2019-03-07,On Hold,Riley Chen
+McCormick & Company,100315,2020-04-08,Active,Taylor Brooks
+McDonald's,100316,2021-05-09,Active,Casey Nguyen
+McKesson Corporation,100317,2022-06-10,Pending,Alex Rivera
+Medtronic,100318,2023-07-11,Closed,Sam Okonkwo
+Merck & Co.,100319,2024-08-12,On Hold,Jamie Patel
+Meta Platforms,100320,2015-09-13,Active,Morgan Blake
+MetLife,100321,2016-10-14,Active,Jordan Lee
+Mettler Toledo,100322,2017-11-15,Pending,Riley Chen
+MGM Resorts,100323,2018-12-16,Closed,Taylor Brooks
+Microchip Technology,100324,2019-01-17,On Hold,Casey Nguyen
+Micron Technology,100325,2020-02-18,Active,Alex Rivera
+Mid-America Apartment Communities,100326,2021-03-19,Active,Sam Okonkwo
+Moderna,100327,2022-04-20,Pending,Jamie Patel
+Molson Coors Beverage Company,100328,2023-05-21,Closed,Morgan Blake
+Mondelez International,100329,2024-06-22,On Hold,Jordan Lee
+Monolithic Power Systems,100330,2015-07-23,Active,Riley Chen
+Monster Beverage,100331,2016-08-24,Active,Taylor Brooks
+Moody's Corporation,100332,2017-09-25,Pending,Casey Nguyen
+Morgan Stanley,100333,2018-10-26,Closed,Alex Rivera
+Mosaic Company (The),100334,2019-11-27,On Hold,Sam Okonkwo
+Motorola Solutions,100335,2020-12-28,Active,Jamie Patel
+MSCI Inc.,100336,2021-01-01,Active,Morgan Blake
+"Nasdaq, Inc.",100337,2022-02-02,Pending,Jordan Lee
+NetApp,100338,2023-03-03,Closed,Riley Chen
+Newmont,100339,2024-04-04,On Hold,Taylor Brooks
+News Corp,100340,2015-05-05,Active,Casey Nguyen
+News Corp (Class B),100341,2016-06-06,Active,Alex Rivera
+NextEra Energy,100342,2017-07-07,Pending,Sam Okonkwo
+"Nike, Inc.",100343,2018-08-08,Closed,Jamie Patel
+NiSource,100344,2019-09-09,On Hold,Morgan Blake
+Nordson Corporation,100345,2020-10-10,Active,Jordan Lee
+Norfolk Southern,100346,2021-11-11,Active,Riley Chen
+Northern Trust,100347,2022-12-12,Pending,Taylor Brooks
+Northrop Grumman,100348,2023-01-13,Closed,Casey Nguyen
+Norwegian Cruise Line Holdings,100349,2024-02-14,On Hold,Alex Rivera
+NRG Energy,100350,2015-03-15,Active,Sam Okonkwo
+Nucor,100351,2016-04-16,Active,Jamie Patel
+Nvidia,100352,2017-05-17,Pending,Morgan Blake
+"NVR, Inc.",100353,2018-06-18,Closed,Jordan Lee
+NXP Semiconductors,100354,2019-07-19,On Hold,Riley Chen
+O’Reilly Automotive,100355,2020-08-20,Active,Taylor Brooks
+Occidental Petroleum,100356,2021-09-21,Active,Casey Nguyen
+Old Dominion,100357,2022-10-22,Pending,Alex Rivera
+Omnicom Group,100358,2023-11-23,Closed,Sam Okonkwo
+ON Semiconductor,100359,2024-12-24,On Hold,Jamie Patel
+Oneok,100360,2015-01-25,Active,Morgan Blake
+Oracle Corporation,100361,2016-02-26,Active,Jordan Lee
+Otis Worldwide,100362,2017-03-27,Pending,Riley Chen
+Paccar,100363,2018-04-28,Closed,Taylor Brooks
+Packaging Corporation of America,100364,2019-05-01,On Hold,Casey Nguyen
+Palantir Technologies,100365,2020-06-02,Active,Alex Rivera
+Palo Alto Networks,100366,2021-07-03,Active,Sam Okonkwo
+Paramount Skydance Corporation,100367,2022-08-04,Pending,Jamie Patel
+Parker Hannifin,100368,2023-09-05,Closed,Morgan Blake
+Paychex,100369,2024-10-06,On Hold,Jordan Lee
+PayPal,100370,2015-11-07,Active,Riley Chen
+Pentair,100371,2016-12-08,Active,Taylor Brooks
+Pfizer,100372,2017-01-09,Pending,Casey Nguyen
+PG&E Corporation,100373,2018-02-10,Closed,Alex Rivera
+Philip Morris International,100374,2019-03-11,On Hold,Sam Okonkwo
+Phillips 66,100375,2020-04-12,Active,Jamie Patel
+Pinnacle West Capital,100376,2021-05-13,Active,Morgan Blake
+PNC Financial Services,100377,2022-06-14,Pending,Jordan Lee
+Pool Corporation,100378,2023-07-15,Closed,Riley Chen
+PPG Industries,100379,2024-08-16,On Hold,Taylor Brooks
+PPL Corporation,100380,2015-09-17,Active,Casey Nguyen
+Principal Financial Group,100381,2016-10-18,Active,Alex Rivera
+Procter & Gamble,100382,2017-11-19,Pending,Sam Okonkwo
+Progressive Corporation,100383,2018-12-20,Closed,Jamie Patel
+Prologis,100384,2019-01-21,On Hold,Morgan Blake
+Prudential Financial,100385,2020-02-22,Active,Jordan Lee
+Public Service Enterprise Group,100386,2021-03-23,Active,Riley Chen
+PTC Inc.,100387,2022-04-24,Pending,Taylor Brooks
+Public Storage,100388,2023-05-25,Closed,Casey Nguyen
+PulteGroup,100389,2024-06-26,On Hold,Alex Rivera
+Quanta Services,100390,2015-07-27,Active,Sam Okonkwo
+Qualcomm,100391,2016-08-28,Active,Jamie Patel
+Quest Diagnostics,100392,2017-09-01,Pending,Morgan Blake
+Qnity Electronics,100393,2018-10-02,Closed,Jordan Lee
+Ralph Lauren Corporation,100394,2019-11-03,On Hold,Riley Chen
+Raymond James Financial,100395,2020-12-04,Active,Taylor Brooks
+RTX Corporation,100396,2021-01-05,Active,Casey Nguyen
+Realty Income,100397,2022-02-06,Pending,Alex Rivera
+Regency Centers,100398,2023-03-07,Closed,Sam Okonkwo
+Regeneron Pharmaceuticals,100399,2024-04-08,On Hold,Jamie Patel
+Regions Financial Corporation,100400,2015-05-09,Active,Morgan Blake
+Republic Services,100401,2016-06-10,Active,Jordan Lee
+ResMed,100402,2017-07-11,Pending,Riley Chen
+Revvity,100403,2018-08-12,Closed,Taylor Brooks
+Robinhood Markets,100404,2019-09-13,On Hold,Casey Nguyen
+Rockwell Automation,100405,2020-10-14,Active,Alex Rivera
+"Rollins, Inc.",100406,2021-11-15,Active,Sam Okonkwo
+Roper Technologies,100407,2022-12-16,Pending,Jamie Patel
+Ross Stores,100408,2023-01-17,Closed,Morgan Blake
+Royal Caribbean Group,100409,2024-02-18,On Hold,Jordan Lee
+S&P Global,100410,2015-03-19,Active,Riley Chen
+Salesforce,100411,2016-04-20,Active,Taylor Brooks
+Sandisk,100412,2017-05-21,Pending,Casey Nguyen
+SBA Communications,100413,2018-06-22,Closed,Alex Rivera
+Schlumberger,100414,2019-07-23,On Hold,Sam Okonkwo
+Seagate Technology,100415,2020-08-24,Active,Jamie Patel
+Sempra,100416,2021-09-25,Active,Morgan Blake
+ServiceNow,100417,2022-10-26,Pending,Jordan Lee
+Sherwin-Williams,100418,2023-11-27,Closed,Riley Chen
+Simon Property Group,100419,2024-12-28,On Hold,Taylor Brooks
+Skyworks Solutions,100420,2015-01-01,Active,Casey Nguyen
+J.M. Smucker Company (The),100421,2016-02-02,Active,Alex Rivera
+Smurfit Westrock,100422,2017-03-03,Pending,Sam Okonkwo
+Snap-on,100423,2018-04-04,Closed,Jamie Patel
+Solventum,100424,2019-05-05,On Hold,Morgan Blake
+Southern Company,100425,2020-06-06,Active,Jordan Lee
+Southwest Airlines,100426,2021-07-07,Active,Riley Chen
+Stanley Black & Decker,100427,2022-08-08,Pending,Taylor Brooks
+Starbucks,100428,2023-09-09,Closed,Casey Nguyen
+State Street Corporation,100429,2024-10-10,On Hold,Alex Rivera
+Steel Dynamics,100430,2015-11-11,Active,Sam Okonkwo
+Steris,100431,2016-12-12,Active,Jamie Patel
+Stryker Corporation,100432,2017-01-13,Pending,Morgan Blake
+Supermicro,100433,2018-02-14,Closed,Jordan Lee
+Synchrony Financial,100434,2019-03-15,On Hold,Riley Chen
+Synopsys,100435,2020-04-16,Active,Taylor Brooks
+Sysco,100436,2021-05-17,Active,Casey Nguyen
+T-Mobile US,100437,2022-06-18,Pending,Alex Rivera
+T. Rowe Price,100438,2023-07-19,Closed,Sam Okonkwo
+Take-Two Interactive,100439,2024-08-20,On Hold,Jamie Patel
+"Tapestry, Inc.",100440,2015-09-21,Active,Morgan Blake
+Targa Resources,100441,2016-10-22,Active,Jordan Lee
+TE Connectivity,100442,2017-11-23,Pending,Riley Chen
+Teledyne Technologies,100443,2018-12-24,Closed,Taylor Brooks
+Teradyne,100444,2019-01-25,On Hold,Casey Nguyen
+"Tesla, Inc.",100445,2020-02-26,Active,Alex Rivera
+Texas Instruments,100446,2021-03-27,Active,Sam Okonkwo
+Texas Pacific Land Corporation,100447,2022-04-28,Pending,Jamie Patel
+Textron,100448,2023-05-01,Closed,Morgan Blake
+Thermo Fisher Scientific,100449,2024-06-02,On Hold,Jordan Lee
+TJX Companies,100450,2015-07-03,Active,Riley Chen
+TKO Group Holdings,100451,2016-08-04,Active,Taylor Brooks
+Trade Desk (The),100452,2017-09-05,Pending,Casey Nguyen
+Tractor Supply,100453,2018-10-06,Closed,Alex Rivera
+Trane Technologies,100454,2019-11-07,On Hold,Sam Okonkwo
+TransDigm Group,100455,2020-12-08,Active,Jamie Patel
+Travelers Companies (The),100456,2021-01-09,Active,Morgan Blake
+Trimble Inc.,100457,2022-02-10,Pending,Jordan Lee
+Truist Financial,100458,2023-03-11,Closed,Riley Chen
+Tyler Technologies,100459,2024-04-12,On Hold,Taylor Brooks
+Tyson Foods,100460,2015-05-13,Active,Casey Nguyen
+U.S. Bancorp,100461,2016-06-14,Active,Alex Rivera
+Uber,100462,2017-07-15,Pending,Sam Okonkwo
+"UDR, Inc.",100463,2018-08-16,Closed,Jamie Patel
+Ulta Beauty,100464,2019-09-17,On Hold,Morgan Blake
+Union Pacific Corporation,100465,2020-10-18,Active,Jordan Lee
+United Airlines Holdings,100466,2021-11-19,Active,Riley Chen
+United Parcel Service,100467,2022-12-20,Pending,Taylor Brooks
+United Rentals,100468,2023-01-21,Closed,Casey Nguyen
+UnitedHealth Group,100469,2024-02-22,On Hold,Alex Rivera
+Universal Health Services,100470,2015-03-23,Active,Sam Okonkwo
+Valero Energy,100471,2016-04-24,Active,Jamie Patel
+Ventas,100472,2017-05-25,Pending,Morgan Blake
+Veralto,100473,2018-06-26,Closed,Jordan Lee
+Verisign,100474,2019-07-27,On Hold,Riley Chen
+Verisk Analytics,100475,2020-08-28,Active,Taylor Brooks
+Verizon,100476,2021-09-01,Active,Casey Nguyen
+Vertex Pharmaceuticals,100477,2022-10-02,Pending,Alex Rivera
+Vertiv,100478,2023-11-03,Closed,Sam Okonkwo
+Viatris,100479,2024-12-04,On Hold,Jamie Patel
+Vici Properties,100480,2015-01-05,Active,Morgan Blake
+Visa Inc.,100481,2016-02-06,Active,Jordan Lee
+Vistra Corp.,100482,2017-03-07,Pending,Riley Chen
+Vulcan Materials Company,100483,2018-04-08,Closed,Taylor Brooks
+W. R. Berkley Corporation,100484,2019-05-09,On Hold,Casey Nguyen
+W. W. Grainger,100485,2020-06-10,Active,Alex Rivera
+Wabtec,100486,2021-07-11,Active,Sam Okonkwo
+Walt Disney Company (The),100487,2022-08-12,Pending,Jamie Patel
+Warner Bros. Discovery,100488,2023-09-13,Closed,Morgan Blake
+Waste Management,100489,2024-10-14,On Hold,Jordan Lee
+Waters Corporation,100490,2015-11-15,Active,Riley Chen
+WEC Energy Group,100491,2016-12-16,Active,Taylor Brooks
+Wells Fargo,100492,2017-01-17,Pending,Casey Nguyen
+Welltower,100493,2018-02-18,Closed,Alex Rivera
+West Pharmaceutical Services,100494,2019-03-19,On Hold,Sam Okonkwo
+Western Digital,100495,2020-04-20,Active,Jamie Patel
+Weyerhaeuser,100496,2021-05-21,Active,Morgan Blake
+"Williams-Sonoma, Inc.",100497,2022-06-22,Pending,Jordan Lee
+Williams Companies,100498,2023-07-23,Closed,Riley Chen
+Willis Towers Watson,100499,2024-08-24,On Hold,Taylor Brooks

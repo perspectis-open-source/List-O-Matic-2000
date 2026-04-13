@@ -1,19 +1,19 @@
 /**
- * @file ContactsTable.stories.tsx
- * @description Storybook stories for ContactsTable component.
+ * @file AgContactsGrid.stories.tsx
+ * @description Storybook stories for AgContactsGrid component.
  * @module List-O-Matic-2000/client
  */
 import type { Meta, StoryObj } from '@storybook/react'
-import { ContactsTable } from './ContactsTable'
+import { AgContactsGrid } from './AgContactsGrid'
 import { mockContacts, mockHeaders } from '../test/fixtures'
 
-const meta: Meta<typeof ContactsTable> = {
-  component: ContactsTable,
+const meta: Meta<typeof AgContactsGrid> = {
+  component: AgContactsGrid,
   tags: ['autodocs'],
 }
 export default meta
 
-type Story = StoryObj<typeof ContactsTable>
+type Story = StoryObj<typeof AgContactsGrid>
 
 export const WithData: Story = {
   args: {
