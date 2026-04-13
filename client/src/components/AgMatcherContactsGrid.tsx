@@ -3,7 +3,7 @@
  * @description AG Grid matcher preview: contact columns plus import company + MUI match dropdown; filterable and resizable.
  * @module List-O-Matic-2000/client
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import type { ColDef, GridApi, GridReadyEvent, ICellRendererParams } from 'ag-grid-community'
 import SearchIcon from '@mui/icons-material/Search'
@@ -23,6 +23,8 @@ export type MatcherMatchGridContext = {
   selection: Record<string, string>
   onSelectionChange: (raw: string, value: string) => void
   canonicalNamesSorted: string[]
+  /** Re-paint match cells after a selection change (other rows may share the same raw company). */
+  requestMatchColumnRefresh: () => void
 }
 
 function compareTrimmedLower(a: string, b: string): number {
@@ -49,11 +51,18 @@ function MatcherMatchCellRenderer(
       size="small"
       fullWidth
       value={value}
-      onChange={(e) => ctx.onSelectionChange(raw, e.target.value)}
+      onChange={(e) => {
+        ctx.onSelectionChange(raw, e.target.value)
+        ctx.requestMatchColumnRefresh()
+      }}
       SelectProps={{
         MenuProps: {
-          disablePortal: true,
-          PaperProps: { sx: { maxHeight: 320 } },
+          disablePortal: false,
+          slotProps: {
+            paper: {
+              sx: { maxHeight: 320, zIndex: 1700 },
+            },
+          },
         },
       }}
       sx={{ '& .MuiSelect-select': { py: 0.75, overflow: 'hidden', textOverflow: 'ellipsis' } }}
@@ -98,23 +107,26 @@ export function AgMatcherContactsGrid({
     [canonicalNames],
   )
 
+  const onGridReady = useCallback((e: GridReadyEvent<ContactRow>) => {
+    gridApiRef.current = e.api
+  }, [])
+
+  const requestMatchColumnRefresh = useCallback(() => {
+    queueMicrotask(() => {
+      gridApiRef.current?.refreshCells({ columns: ['match_company'], force: true })
+    })
+  }, [])
+
   const gridContext = useMemo<MatcherMatchGridContext>(
     () => ({
       companyColumnKey: companyColumnKey ?? '',
       selection,
       onSelectionChange,
       canonicalNamesSorted: sortedCanon,
+      requestMatchColumnRefresh,
     }),
-    [companyColumnKey, selection, onSelectionChange, sortedCanon],
+    [companyColumnKey, selection, onSelectionChange, sortedCanon, requestMatchColumnRefresh],
   )
-
-  const onGridReady = useCallback((e: GridReadyEvent<ContactRow>) => {
-    gridApiRef.current = e.api
-  }, [])
-
-  useEffect(() => {
-    gridApiRef.current?.refreshCells({ columns: ['match_company'], force: true })
-  }, [selection])
 
   const columnDefs = useMemo<ColDef<ContactRow>[]>(() => {
     if (!companyColumnKey) return []
