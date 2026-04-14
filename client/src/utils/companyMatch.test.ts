@@ -10,12 +10,57 @@ import {
   matchDeterministicBatch,
   pickMatchedCompanyHeader,
   tierFromScores,
+  stripTrailingLegalSuffixForMatch,
+  buildMatcherTableExport,
+  MATCHER_TABLE_EXPORT_MATCH_HEADER,
 } from './companyMatch'
 import type { CompanyRow } from './parseFile'
 
 describe('normalizeForMatch', () => {
   it('lowercases and collapses spaces', () => {
     expect(normalizeForMatch('  Acme  Inc ')).toBe('acme inc')
+  })
+})
+
+describe('stripTrailingLegalSuffixForMatch', () => {
+  it('strips ltd / inc / corp style suffixes from normalized strings', () => {
+    expect(stripTrailingLegalSuffixForMatch('apple ltd')).toBe('apple')
+    expect(stripTrailingLegalSuffixForMatch('apple inc.')).toBe('apple')
+    expect(stripTrailingLegalSuffixForMatch('acme corp')).toBe('acme')
+    expect(stripTrailingLegalSuffixForMatch('widgets limited')).toBe('widgets')
+  })
+  it('strips repeatedly for chained suffixes', () => {
+    expect(stripTrailingLegalSuffixForMatch('foo inc. llc')).toBe('foo')
+  })
+})
+
+describe('legal suffix core matching', () => {
+  it('auto-matches Apple Ltd import to Apple Inc. canonical', () => {
+    const canon = ['Apple Inc.']
+    const rows = matchDeterministicBatch(['Apple Ltd'], canon)
+    expect(rows[0].tier).toBe('auto')
+    expect(rows[0].best).toBe('Apple Inc.')
+    expect(rows[0].bestScore).toBeGreaterThanOrEqual(0.91)
+  })
+
+  it('auto-matches Acme Corp to Acme Limited', () => {
+    const canon = ['Acme Limited']
+    const rows = matchDeterministicBatch(['Acme Corp'], canon)
+    expect(rows[0].tier).toBe('auto')
+    expect(rows[0].best).toBe('Acme Limited')
+  })
+
+  it('does not force a near-1 score for very short shared cores', () => {
+    const canon = ['Pi LLC']
+    const rows = matchDeterministicBatch(['Pi Inc'], canon)
+    expect(rows[0].bestScore).toBeLessThan(0.91)
+  })
+
+  it('still separates distinct companies that only share a generic token', () => {
+    const canon = ['Northwind Traders Inc', 'Northwind Foods LLC']
+    const rows = matchDeterministicBatch(['Northwind Traders Ltd'], canon)
+    expect(rows[0].best).toBe('Northwind Traders Inc')
+    expect(rows[0].tier).toBe('auto')
   })
 })
 
@@ -68,6 +113,23 @@ describe('matchDeterministicBatch', () => {
   it('prefers Coca-Cola Company over Cooper Companies for Coke', () => {
     const rows = matchDeterministicBatch(['Coke'], ['Cooper Companies', 'Coca-Cola Company'])
     expect(rows[0].best).toBe('Coca-Cola Company')
+  })
+})
+
+describe('buildMatcherTableExport', () => {
+  it('orders columns like the matcher grid and includes import + match', () => {
+    const headers = ['Email', 'Company', 'City']
+    const contacts: ContactRow[] = [
+      { Email: 'a@x.com', Company: 'Acme', City: 'NYC' },
+    ]
+    const { data, csvHeaders } = buildMatcherTableExport(contacts, headers, 'Company', {
+      Acme: 'Acme Holdings',
+    })
+    expect(csvHeaders).toEqual(['Email', 'Company (import)', MATCHER_TABLE_EXPORT_MATCH_HEADER, 'City'])
+    expect(data[0]['Email']).toBe('a@x.com')
+    expect(data[0]['Company (import)']).toBe('Acme')
+    expect(data[0][MATCHER_TABLE_EXPORT_MATCH_HEADER]).toBe('Acme Holdings')
+    expect(data[0].City).toBe('NYC')
   })
 })
 

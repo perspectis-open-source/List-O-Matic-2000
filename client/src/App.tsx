@@ -47,7 +47,11 @@ import { AgContactsGrid } from './components/AgContactsGrid'
 import { AgCompaniesGrid } from './components/AgCompaniesGrid'
 import { CompanySelect } from './components/CompanySelect'
 import { postChat, type ReasoningStep } from './api/chat'
-import { postMatchCompaniesBatched, type MatchCompaniesUsageTotals } from './api/matchCompanies'
+import {
+  postMatchCompaniesBatched,
+  type MatchCompaniesUsageTotals,
+  type MatcherServerStreamProgress,
+} from './api/matchCompanies'
 import { CrmExportFeature } from './components/CrmExportFeature'
 import {
   MatcherReviewPanel,
@@ -62,6 +66,32 @@ import {
   MATCH_COMPANIES_OPENAI_MODEL,
 } from './constants/openaiPricing'
 import { canonicalNamesFromCompanies, matchDeterministicBatch, pickMatchedCompanyHeader } from './utils/companyMatch'
+
+function applyMatcherStreamProgress(
+  prev: MatcherLlmProgress | null,
+  ev: MatcherServerStreamProgress,
+  fallbackBatchTotal: number
+): MatcherLlmProgress {
+  const base: MatcherLlmProgress = prev ?? { completed: 0, total: fallbackBatchTotal }
+  const server = { ...base.server }
+  if (ev.phase === 'step1') {
+    server.step1 = {
+      completed: ev.completed ?? 0,
+      total: ev.total ?? 1,
+      cached: ev.cached,
+    }
+  }
+  if (ev.phase === 'step2') {
+    server.step2 = { completed: ev.completed ?? 0, total: ev.total ?? 1 }
+  }
+  if (ev.phase === 'step3') {
+    server.step3 = { done: true, detail: ev.detail }
+  }
+  if (ev.phase === 'fallback') {
+    server.fallback = { completed: ev.completed ?? 0, total: ev.total ?? 1 }
+  }
+  return { completed: base.completed, total: base.total, server }
+}
 
 type TabValue = 'contacts' | 'companies' | 'normalizer' | 'matcher'
 
@@ -235,6 +265,10 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
             clientBatchSize: MATCH_MATCHER_CLIENT_BATCH_SIZE,
             onHttpRequestStart: ({ batchIndex, batchTotal, itemCount }) => {
               setMatcherHttpWaiting(true)
+              setMatcherLlmProgress({
+                completed: Math.max(0, batchIndex - 1),
+                total: batchTotal,
+              })
               pushMatcherLog(`Batch ${batchIndex}/${batchTotal}: sending ${itemCount} string(s)…`)
             },
             onHttpRequestComplete: ({
@@ -268,6 +302,9 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
             },
             onBatchProgress: (completed, total) => {
               setMatcherLlmProgress({ completed, total })
+            },
+            onServerStreamProgress: (ev) => {
+              setMatcherLlmProgress((prev) => applyMatcherStreamProgress(prev, ev, totalBatches))
             },
           },
         )

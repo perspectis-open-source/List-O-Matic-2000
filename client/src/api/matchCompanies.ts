@@ -22,6 +22,16 @@ export type MatchCompaniesResponse = {
   meta?: { llmSubBatches?: number; usage?: MatchCompaniesUsageTotals; model?: string }
 }
 
+/** One NDJSON `progress` line from POST /api/match-companies when `streamProgress: true`. */
+export type MatcherServerStreamProgress = {
+  type?: 'progress'
+  phase: 'step1' | 'step2' | 'step3' | 'fallback'
+  completed?: number
+  total?: number
+  cached?: boolean
+  detail?: string
+}
+
 export type MatchCompaniesHttpInfo = {
   batchIndex: number
   batchTotal: number
@@ -33,18 +43,92 @@ export type MatchCompaniesHttpInfo = {
   usageThisRequest?: MatchCompaniesUsageTotals
 }
 
+async function readMatchCompaniesNdjsonStream(
+  res: Response,
+  onStreamProgress: (ev: MatcherServerStreamProgress) => void
+): Promise<MatchCompaniesResponse> {
+  const reader = res.body?.getReader()
+  if (!reader) {
+    throw new Error('No response body')
+  }
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let complete: MatchCompaniesResponse | null = null
+  const handleLine = (line: string) => {
+    const trimmed = line.trim()
+    if (!trimmed) return
+    const msg = JSON.parse(trimmed) as {
+      type?: string
+      phase?: MatcherServerStreamProgress['phase']
+      completed?: number
+      total?: number
+      cached?: boolean
+      detail?: string
+      results?: MatchCompanyResult[]
+      meta?: MatchCompaniesResponse['meta']
+      error?: string
+    }
+    if (msg.type === 'progress' && msg.phase) {
+      onStreamProgress({
+        phase: msg.phase,
+        completed: msg.completed,
+        total: msg.total,
+        cached: msg.cached,
+        detail: msg.detail,
+      })
+    }
+    if (msg.type === 'complete') {
+      complete = { results: msg.results ?? [], meta: msg.meta }
+    }
+    if (msg.type === 'error') {
+      throw new Error(msg.error?.trim() || 'Match request failed')
+    }
+  }
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    for (;;) {
+      const nl = buffer.indexOf('\n')
+      if (nl === -1) break
+      const line = buffer.slice(0, nl)
+      buffer = buffer.slice(nl + 1)
+      handleLine(line)
+    }
+  }
+  if (buffer.trim()) handleLine(buffer)
+  if (!complete) {
+    throw new Error('Incomplete match response stream')
+  }
+  return complete
+}
+
+export type PostMatchCompaniesOptions = {
+  onStreamProgress?: (ev: MatcherServerStreamProgress) => void
+}
+
 export async function postMatchCompanies(
   canonicalNames: string[],
-  items: MatchCompanyItem[]
+  items: MatchCompanyItem[],
+  options?: PostMatchCompaniesOptions
 ): Promise<MatchCompaniesResponse> {
+  const streamProgress = Boolean(options?.onStreamProgress)
   const res = await fetch(`${API_BASE}/api/match-companies`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ canonicalNames, items }),
+    body: JSON.stringify({
+      canonicalNames,
+      items,
+      ...(streamProgress ? { streamProgress: true } : {}),
+    }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error((err as { error?: string }).error ?? `Request failed: ${res.status}`)
+  }
+  const ct = res.headers.get('content-type') ?? ''
+  if (streamProgress && ct.includes('application/x-ndjson')) {
+    return readMatchCompaniesNdjsonStream(res, options.onStreamProgress!)
   }
   return res.json() as Promise<MatchCompaniesResponse>
 }
@@ -58,6 +142,8 @@ export type PostMatchCompaniesBatchedOptions = {
   onHttpRequestComplete?: (info: MatchCompaniesHttpInfo) => void
   /** Fires after each HTTP chunk completes (`completed` 1..`total`). */
   onBatchProgress?: (completed: number, total: number) => void
+  /** NDJSON progress events for the server three-step pipeline (one HTTP request may emit many). */
+  onServerStreamProgress?: (ev: MatcherServerStreamProgress) => void
 }
 
 export type PostMatchCompaniesBatchedResult = {
@@ -96,7 +182,9 @@ export async function postMatchCompaniesBatched(
     const chunk = items.slice(i, i + chunkSize)
     const batchIndex = Math.floor(i / chunkSize) + 1
     options?.onHttpRequestStart?.({ batchIndex, batchTotal: total, itemCount: chunk.length })
-    const { results, meta } = await postMatchCompanies(canonicalNames, chunk)
+    const { results, meta } = await postMatchCompanies(canonicalNames, chunk, {
+      onStreamProgress: options?.onServerStreamProgress,
+    })
     all.push(...results)
     if (addUsage(usageTotals, meta?.usage)) sawAnyUsage = true
     const m = meta?.model?.trim()

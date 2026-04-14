@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MATCH_API_BATCH_SIZE } from '../constants/companyMatch'
-import { postMatchCompaniesBatched } from './matchCompanies'
+import { postMatchCompanies, postMatchCompaniesBatched } from './matchCompanies'
 
 describe('postMatchCompaniesBatched', () => {
   afterEach(() => {
@@ -43,6 +43,41 @@ describe('postMatchCompaniesBatched', () => {
     const out = await postMatchCompaniesBatched(['A'], [])
     expect(out).toEqual({ results: [], usageTotals: null, matcherModel: null })
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('postMatchCompanies parses NDJSON stream and emits progress', async () => {
+    const lines = [
+      JSON.stringify({ type: 'progress', phase: 'step1', completed: 1, total: 2 }),
+      JSON.stringify({
+        type: 'complete',
+        results: [{ raw: 'r0', match: null }],
+        meta: {
+          model: 'gpt-4o-mini',
+          llmSubBatches: 3,
+          usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        },
+      }),
+    ]
+    const enc = new TextEncoder()
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(enc.encode(`${lines.join('\n')}\n`))
+        controller.close()
+      },
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' },
+      })
+    )
+    const phases: string[] = []
+    const out = await postMatchCompanies(['Acme'], [{ raw: 'r0', topCandidates: [] }], {
+      onStreamProgress: (ev) => phases.push(ev.phase),
+    })
+    expect(phases).toEqual(['step1'])
+    expect(out.results).toEqual([{ raw: 'r0', match: null }])
+    expect(out.meta?.llmSubBatches).toBe(3)
   })
 
   it('uses clientBatchSize and reports server llmSubBatches on complete', async () => {

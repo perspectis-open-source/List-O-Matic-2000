@@ -2,7 +2,7 @@
  * @file MatcherReviewPanel.tsx
  * @description Contact Company Matcher: full contact list with import company + match dropdown columns; resizable widths; Apply adds Matched Company column.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Box,
   Button,
@@ -20,8 +20,11 @@ import CheckIcon from '@mui/icons-material/Check'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import FilterListIcon from '@mui/icons-material/FilterList'
+import DownloadIcon from '@mui/icons-material/Download'
 import { AgMatcherContactsGrid } from './AgMatcherContactsGrid'
 import type { ContactRow } from '../utils/parseFile'
+import { buildMatcherTableExport } from '../utils/companyMatch'
+import { downloadCsv } from '../utils/exportCsv'
 
 export type MatcherRowModel = {
   raw: string
@@ -31,7 +34,19 @@ export type MatcherRowModel = {
   optionHints: string[]
 }
 
-export type MatcherLlmProgress = { completed: number; total: number }
+export type MatcherPhaseSlice = { completed: number; total: number; cached?: boolean }
+
+/** HTTP batch progress plus optional server-side three-step pipeline slices (one HTTP request). */
+export type MatcherLlmProgress = {
+  completed: number
+  total: number
+  server?: {
+    step1?: MatcherPhaseSlice
+    step2?: MatcherPhaseSlice
+    step3?: { done: boolean; detail?: string }
+    fallback?: MatcherPhaseSlice
+  }
+}
 
 export type MatcherSelectionProvenance = 'llm' | 'deterministic' | 'manual'
 
@@ -168,6 +183,18 @@ export function MatcherReviewPanel({
     })
   }, [contacts, companyColumnKey, selection, showUnmatchedOnly])
 
+  const handleExportTable = useCallback(() => {
+    if (!companyColumnKey || contactsForGrid.length === 0) return
+    const { data, csvHeaders } = buildMatcherTableExport(
+      contactsForGrid,
+      headers,
+      companyColumnKey,
+      selection
+    )
+    const date = new Date().toISOString().slice(0, 10)
+    downloadCsv(data, csvHeaders, `matcher-table-${date}.csv`)
+  }, [contactsForGrid, headers, companyColumnKey, selection])
+
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [runLog])
@@ -199,6 +226,13 @@ export function MatcherReviewPanel({
     running && ((llmProgress != null && llmProgress.total > 0) || httpWaiting)
 
   const showActivityPanel = runLog.length > 0 || running
+  const serverStepsVisible = Boolean(
+    llmProgress?.server &&
+      (llmProgress.server.step1 ||
+        llmProgress.server.step2 ||
+        llmProgress.server.step3?.done ||
+        (llmProgress.server.fallback && llmProgress.server.fallback.total > 0))
+  )
 
   return (
     <Box
@@ -229,6 +263,19 @@ export function MatcherReviewPanel({
         >
           Apply to contacts
         </Button>
+        <Tooltip title="Download the current grid as CSV (same rows as shown; includes match selections).">
+          <span>
+            <Button
+              variant="outlined"
+              startIcon={<DownloadIcon />}
+              onClick={handleExportTable}
+              disabled={running || !showTable || contactsForGrid.length === 0}
+              data-testid="matcher-export-table-button"
+            >
+              Export table
+            </Button>
+          </span>
+        </Tooltip>
       </Box>
 
       {showProgress && (
@@ -254,6 +301,66 @@ export function MatcherReviewPanel({
               sx={{ mt: 0.75, borderRadius: 1, height: 4, opacity: 0.85 }}
               data-testid="matcher-llm-progress-pending"
             />
+          )}
+          {serverStepsVisible && (httpWaiting || running) && (
+            <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 0.75 }} data-testid="matcher-server-steps">
+              {llmProgress.server.step1 && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    {llmProgress.server.step1.cached
+                      ? '① List rows — parent inference (cached)'
+                      : `① List rows — parent inference (${llmProgress.server.step1.completed} / ${llmProgress.server.step1.total} model batches)`}
+                  </Typography>
+                  {!llmProgress.server.step1.cached && llmProgress.server.step1.total > 0 && (
+                    <LinearProgress
+                      variant="determinate"
+                      value={
+                        (100 * llmProgress.server.step1.completed) / Math.max(1, llmProgress.server.step1.total)
+                      }
+                      sx={{ mt: 0.25, borderRadius: 1, height: 4 }}
+                    />
+                  )}
+                </Box>
+              )}
+              {llmProgress.server.step2 && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    ② Contact strings — parent inference ({llmProgress.server.step2.completed} /{' '}
+                    {llmProgress.server.step2.total} model batches)
+                  </Typography>
+                  {llmProgress.server.step2.total > 0 && (
+                    <LinearProgress
+                      variant="determinate"
+                      value={
+                        (100 * llmProgress.server.step2.completed) / Math.max(1, llmProgress.server.step2.total)
+                      }
+                      sx={{ mt: 0.25, borderRadius: 1, height: 4 }}
+                    />
+                  )}
+                </Box>
+              )}
+              {llmProgress.server.step3?.done && (
+                <Typography variant="caption" color="text.secondary" display="block">
+                  ③ Match on parent labels — {llmProgress.server.step3.detail ?? 'done'}
+                </Typography>
+              )}
+              {llmProgress.server.fallback && llmProgress.server.fallback.total > 0 && (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    ④ Closed-list fallback ({llmProgress.server.fallback.completed} /{' '}
+                    {llmProgress.server.fallback.total} model batches)
+                  </Typography>
+                  <LinearProgress
+                    variant="determinate"
+                    value={
+                      (100 * llmProgress.server.fallback.completed) /
+                      Math.max(1, llmProgress.server.fallback.total)
+                    }
+                    sx={{ mt: 0.25, borderRadius: 1, height: 4 }}
+                  />
+                </Box>
+              )}
+            </Box>
           )}
         </Box>
       )}

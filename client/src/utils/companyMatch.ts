@@ -2,7 +2,7 @@
  * @file companyMatch.ts
  * @description Deterministic company-name matching: normalize, blocking index, Jaro–Winkler scoring, tiering.
  */
-import type { CompanyRow } from './parseFile'
+import type { CompanyRow, ContactRow } from './parseFile'
 import {
   MATCH_BLOCKING_EXPAND_THRESHOLD,
   MATCH_MAX_CANDIDATES_FULL_SCAN,
@@ -74,6 +74,43 @@ export function jaroWinkler(a: string, b: string, p = 0.1): number {
 export function normalizeForMatch(s: string): string {
   const t = s.normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ')
   return t
+}
+
+/**
+ * Trailing legal / entity suffixes (longer first). Keep aligned with server `LEGAL_SUFFIXES` in index.js.
+ */
+const LEGAL_SUFFIXES_STRIP_ORDER = [
+  'Inc.',
+  'Inc',
+  'Corp.',
+  'Corp',
+  'Ltd.',
+  'Ltd',
+  'Co.',
+  'Co',
+  'LLC',
+  'Limited',
+  'Computer',
+] as const
+
+/**
+ * Strip trailing ` {suffix}` segments from a normalized (lowercase) match string; repeats until stable.
+ */
+export function stripTrailingLegalSuffixForMatch(norm: string): string {
+  let s = norm.trim()
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const suffix of LEGAL_SUFFIXES_STRIP_ORDER) {
+      const tail = ' ' + suffix.toLowerCase()
+      if (s.endsWith(tail)) {
+        s = s.slice(0, -tail.length).trimEnd()
+        changed = true
+        break
+      }
+    }
+  }
+  return s
 }
 
 function blockingKey2(norm: string): string {
@@ -194,32 +231,53 @@ function collectCandidates(
   return arr
 }
 
+/** Score using cores after stripping legal suffixes (e.g. apple ltd vs apple inc.). */
+function coreScoreBonus(rawNorm: string, cNorm: string): number {
+  const rawCore = stripTrailingLegalSuffixForMatch(rawNorm)
+  const cCore = stripTrailingLegalSuffixForMatch(cNorm)
+  if (!rawCore || !cCore) return 0
+  if (rawCore === cCore) {
+    if (rawCore.length >= 3) return 0.96
+    return jaroWinkler(rawNorm, cNorm)
+  }
+  if (rawCore.includes(cCore) || cCore.includes(rawCore)) {
+    return Math.min(1, jaroWinkler(rawCore, cCore) + 0.08)
+  }
+  return jaroWinkler(rawCore, cCore)
+}
+
 function scorePair(rawNorm: string, canonical: string): number {
   const cNorm = normalizeForMatch(canonical)
   if (rawNorm === cNorm) return 1
+  let score: number
   if (rawNorm.includes(cNorm) || cNorm.includes(rawNorm)) {
     const base = jaroWinkler(rawNorm, cNorm)
-    return Math.min(1, base + 0.08)
+    score = Math.min(1, base + 0.08)
+  } else {
+    const full = jaroWinkler(rawNorm, cNorm)
+    const rawAl = rawNorm.replace(/[^a-z0-9]/g, '')
+    const rawAlLen = rawAl.length
+    // Compare raw to each distinctive "word" so nicknames like "Coke" score against "coca" / "cola".
+    // Generic words ("Companies", "LLC") and length-penalized longer tokens reduce false positives (e.g. "Cooper").
+    if (rawAlLen < 3) {
+      score = full
+    } else {
+      const tokens = cNorm.split(/[^a-z0-9]+/).filter(Boolean)
+      let tokenBest = 0
+      let strongDistinctiveTokens = 0
+      for (const tok of tokens) {
+        const tScore = tokenMatchScore(rawNorm, rawAlLen, tok)
+        tokenBest = Math.max(tokenBest, tScore)
+        if (tScore >= 0.58) strongDistinctiveTokens++
+      }
+      let combined = Math.max(full, tokenBest)
+      if (strongDistinctiveTokens >= 2) {
+        combined = Math.min(1, combined + 0.04)
+      }
+      score = combined
+    }
   }
-  const full = jaroWinkler(rawNorm, cNorm)
-  const rawAl = rawNorm.replace(/[^a-z0-9]/g, '')
-  const rawAlLen = rawAl.length
-  // Compare raw to each distinctive "word" so nicknames like "Coke" score against "coca" / "cola".
-  // Generic words ("Companies", "LLC") and length-penalized longer tokens reduce false positives (e.g. "Cooper").
-  if (rawAlLen < 3) return full
-  const tokens = cNorm.split(/[^a-z0-9]+/).filter(Boolean)
-  let tokenBest = 0
-  let strongDistinctiveTokens = 0
-  for (const tok of tokens) {
-    const tScore = tokenMatchScore(rawNorm, rawAlLen, tok)
-    tokenBest = Math.max(tokenBest, tScore)
-    if (tScore >= 0.58) strongDistinctiveTokens++
-  }
-  let combined = Math.max(full, tokenBest)
-  if (strongDistinctiveTokens >= 2) {
-    combined = Math.min(1, combined + 0.04)
-  }
-  return combined
+  return Math.max(score, coreScoreBonus(rawNorm, cNorm))
 }
 
 export function scoreRawAgainstCanonicals(
@@ -297,4 +355,41 @@ export function pickMatchedCompanyHeader(existingHeaders: string[]): string {
   let i = 2
   while (existingHeaders.includes(`${base} ${i}`)) i++
   return `${base} ${i}`
+}
+
+/** CSV column for the match dropdown; must match `AgMatcherContactsGrid` headerName. */
+export const MATCHER_TABLE_EXPORT_MATCH_HEADER = 'Match to company list'
+
+/**
+ * Build rows and header list for exporting the matcher preview table (same column order as the grid).
+ */
+export function buildMatcherTableExport(
+  contacts: ContactRow[],
+  headers: string[],
+  companyColumnKey: string,
+  selection: Record<string, string>
+): { data: ContactRow[]; csvHeaders: string[] } {
+  const csvHeaders: string[] = []
+  for (const h of headers) {
+    if (h === companyColumnKey) {
+      csvHeaders.push(`${h} (import)`)
+      csvHeaders.push(MATCHER_TABLE_EXPORT_MATCH_HEADER)
+    } else {
+      csvHeaders.push(h)
+    }
+  }
+  const data: ContactRow[] = contacts.map((row) => {
+    const out: ContactRow = {}
+    for (const h of headers) {
+      if (h === companyColumnKey) {
+        const raw = String(row[h] ?? '').trim()
+        out[`${h} (import)`] = String(row[h] ?? '')
+        out[MATCHER_TABLE_EXPORT_MATCH_HEADER] = selection[raw] ?? ''
+      } else {
+        out[h] = String(row[h] ?? '')
+      }
+    }
+    return out
+  })
+  return { data, csvHeaders }
 }
