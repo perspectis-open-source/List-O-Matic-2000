@@ -1,6 +1,6 @@
 /**
  * @file MatcherReviewPanel.tsx
- * @description Contact Company Matcher: full contact list with import company + match dropdown columns; resizable widths; Apply adds Matched Company column.
+ * @description Contact Company Matcher: full contact list with import company + match dropdown columns; resizable widths.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
@@ -16,7 +16,6 @@ import {
 } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
-import CheckIcon from '@mui/icons-material/Check'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import FilterListIcon from '@mui/icons-material/FilterList'
@@ -153,7 +152,6 @@ type MatcherReviewPanelProps = {
   runLog: string[]
   onSelectionChange: (raw: string, value: string) => void
   onRun: () => void
-  onApply: () => void
 }
 
 export function MatcherReviewPanel({
@@ -173,7 +171,6 @@ export function MatcherReviewPanel({
   runLog,
   onSelectionChange,
   onRun,
-  onApply,
 }: MatcherReviewPanelProps) {
   const theme = useTheme()
   /** Deep green in light mode (readable on pale backgrounds); neon in dark mode. */
@@ -317,15 +314,6 @@ export function MatcherReviewPanel({
           data-testid="matcher-run-button"
         >
           {running ? 'Running…' : 'Run matcher'}
-        </Button>
-        <Button
-          variant="outlined"
-          startIcon={<CheckIcon />}
-          onClick={onApply}
-          disabled={running || rows.length === 0}
-          data-testid="matcher-apply-button"
-        >
-          Apply to contacts
         </Button>
         <Tooltip title="Download the current grid as CSV (same rows as shown; includes match selections).">
           <span>

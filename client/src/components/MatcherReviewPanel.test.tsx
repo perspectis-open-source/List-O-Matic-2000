@@ -66,7 +66,6 @@ describe('MatcherReviewPanel', () => {
         runLog={[]}
         onSelectionChange={() => {}}
         onRun={() => {}}
-        onApply={() => {}}
       />,
     )
 

@@ -31,6 +31,7 @@ import {
   Tooltip,
   Menu,
   MenuItem,
+  Divider,
 } from '@mui/material'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -47,7 +48,7 @@ import { ImportWorkflowDialog, type UploadImportKind } from './components/Upload
 import { AgContactsGrid } from './components/AgContactsGrid'
 import { AgCompaniesGrid } from './components/AgCompaniesGrid'
 import { CompanySelect } from './components/CompanySelect'
-import { postChat, type ReasoningStep } from './api/chat'
+import { postChat } from './api/chat'
 import {
   postMatchCompaniesBatched,
   type MatchCompaniesUsageTotals,
@@ -66,7 +67,7 @@ import {
   formatUsdEstimate,
   MATCH_COMPANIES_OPENAI_MODEL,
 } from './constants/openaiPricing'
-import { canonicalNamesFromCompanies, matchDeterministicBatch, pickMatchedCompanyHeader } from './utils/companyMatch'
+import { canonicalNamesFromCompanies, matchDeterministicBatch } from './utils/companyMatch'
 
 function applyMatcherStreamProgress(
   prev: MatcherLlmProgress | null,
@@ -125,7 +126,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
   const [aiSearchLoading, setAiSearchLoading] = useState(false)
   const [aiSearchError, setAiSearchError] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
-  const [reasoningSteps, setReasoningSteps] = useState<ReasoningStep[] | null>(null)
   const [persistedAiResultRows, setPersistedAiResultRows] = useState<ContactRow[] | null>(null)
   const [processLogLines, setProcessLogLines] = useState<string[]>([])
   const [normalizerLogVisible, setNormalizerLogVisible] = useState(true)
@@ -141,7 +141,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
   const [matcherLlmProgress, setMatcherLlmProgress] = useState<MatcherLlmProgress | null>(null)
   const [matcherHttpWaiting, setMatcherHttpWaiting] = useState(false)
   const [matcherRunLog, setMatcherRunLog] = useState<string[]>([])
-  const [matcherColumnKey, setMatcherColumnKey] = useState<string | null>(null)
 
   const handleContactsFileAccepted = useCallback(async (file: File) => {
     setParseError(null)
@@ -150,7 +149,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     setExcludedMatchNames([])
     setAiSearchError(null)
     setExportError(null)
-    setReasoningSteps(null)
     setPersistedAiResultRows(null)
     setOverrideCompanyName(null)
     setCompanyNameOverrideInput('')
@@ -161,7 +159,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     setMatcherHttpWaiting(false)
     setMatcherRunLog([])
     setMatcherError(null)
-    setMatcherColumnKey(null)
     try {
       const { data, headers: h, companyColumnKey: key, entityColumnKey: entityKey } = await parseContactFile(file)
       setContacts(data)
@@ -192,7 +189,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     setMatcherHttpWaiting(false)
     setMatcherRunLog([])
     setMatcherError(null)
-    setMatcherColumnKey(null)
     try {
       const { data, headers: h } = await parseCompanyFile(file)
       setCompanies(data)
@@ -447,20 +443,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     setMatcherSelectionProvenance((prev) => ({ ...prev, [raw]: 'manual' }))
   }, [])
 
-  const handleApplyMatcher = useCallback(() => {
-    if (!companyColumnKey || matcherRows.length === 0) return
-    const colKey = matcherColumnKey ?? pickMatchedCompanyHeader(headers)
-    if (!matcherColumnKey) setMatcherColumnKey(colKey)
-    setHeaders((h) => (h.includes(colKey) ? h : [...h, colKey]))
-    setContacts((prev) =>
-      prev.map((row) => {
-        const raw = String(row[companyColumnKey] ?? '').trim()
-        const pick = (matcherSelections[raw] ?? '').trim()
-        return { ...row, [colKey]: pick }
-      })
-    )
-  }, [companyColumnKey, matcherRows.length, matcherColumnKey, headers, matcherSelections])
-
   const openMatcherTab = useCallback(() => {
     setActiveTab('matcher')
   }, [])
@@ -511,7 +493,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     if (!company || !companyColumnKey || aiSearchLoading) return
     setAiSearchError(null)
 
-    setReasoningSteps(null)
     setInferredParentCompany(null)
     setOverrideCompanyName(null)
     setCompanyNameOverrideInput('')
@@ -552,7 +533,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
       setMatchingCompanyNames(res.matchingCompanyNames ?? [])
       setExcludedMatchNames([])
       setInferredParentCompany(res.parentCompany ?? null)
-      setReasoningSteps(res.reasoningSteps ?? null)
       const matchedNames = res.matchingCompanyNames ?? []
       const matchedRows = contacts.filter((row) => {
         const cell = companyColumnKey ? String(row[companyColumnKey] ?? '').trim() : ''
@@ -571,7 +551,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
       setMatchingCompanyNames([])
       setExcludedMatchNames([])
       setInferredParentCompany(null)
-      setReasoningSteps(null)
       setPersistedAiResultRows(null)
       setTimeout(() => setAiSearchLoading(false), 2000)
     }
@@ -627,6 +606,29 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     else setCompanyParseError(null)
     setUploadDialogOpen(true)
   }, [])
+
+  const matcherStartToolbarButton =
+    workspaceMode === 'matcher' ? (
+      <Tooltip
+        title={
+          matcherCanRun
+            ? 'Contact Company Matcher: run matching against your companies list.'
+            : 'Import a companies file and ensure contacts include a company column.'
+        }
+      >
+        <span>
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={!matcherCanRun || matcherRunning}
+            onClick={handleMatcherToolbarClick}
+            data-testid="contact-company-matcher-button"
+          >
+            Start Matcher
+          </Button>
+        </span>
+      </Tooltip>
+    ) : null
 
   return (
     <Box
@@ -709,7 +711,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
             color="inherit"
             size="small"
             onClick={(e) => setUploadMenuAnchor(e.currentTarget)}
-            aria-label="Upload files"
+            aria-label="App menu"
             aria-controls={uploadMenuOpen ? 'header-upload-menu' : undefined}
             aria-haspopup="true"
             aria-expanded={uploadMenuOpen ? 'true' : undefined}
@@ -744,6 +746,33 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
             >
               Upload companies
             </MenuItem>
+            {hasContacts && (
+              <>
+                <Divider component="li" sx={{ my: 0.5 }} />
+                <MenuItem
+                  selected={workspaceMode === 'normalizer'}
+                  onClick={() => {
+                    setUploadMenuAnchor(null)
+                    setWorkspaceMode('normalizer')
+                    setActiveTab('contacts')
+                  }}
+                  data-testid="header-workspace-normalizer"
+                >
+                  Contact Company Normalizer
+                </MenuItem>
+                <MenuItem
+                  selected={workspaceMode === 'matcher'}
+                  onClick={() => {
+                    setUploadMenuAnchor(null)
+                    setWorkspaceMode('matcher')
+                    setActiveTab('contacts')
+                  }}
+                  data-testid="header-workspace-matcher"
+                >
+                  Contact Company Matcher
+                </MenuItem>
+              </>
+            )}
           </Menu>
           <IconButton color="inherit" size="small" onClick={onToggleMode} aria-label="Toggle theme">
             {mode === 'dark' ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
@@ -1018,27 +1047,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
               <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, flexShrink: 0 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                    {workspaceMode === 'matcher' && (
-                      <Tooltip
-                        title={
-                          matcherCanRun
-                            ? 'Contact Company Matcher: run matching against your companies list.'
-                            : 'Import a companies file and ensure contacts include a company column.'
-                        }
-                      >
-                        <span>
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            disabled={!matcherCanRun || matcherRunning}
-                            onClick={handleMatcherToolbarClick}
-                            data-testid="contact-company-matcher-button"
-                          >
-                            Start Matcher
-                          </Button>
-                        </span>
-                      </Tooltip>
-                    )}
+                    {matcherStartToolbarButton}
                     <Typography variant="subtitle2" color="primary">
                       Import list — {contacts.length.toLocaleString()} row{contacts.length !== 1 ? 's' : ''}
                     </Typography>
@@ -1078,9 +1087,21 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                   </Box>
                 ) : (
                   <>
-                    <Typography variant="subtitle2" color="primary" sx={{ mb: 1, flexShrink: 0 }}>
-                      {companyFileName} — {companies.length.toLocaleString()} row{companies.length !== 1 ? 's' : ''}
-                    </Typography>
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1,
+                        flexWrap: 'wrap',
+                        mb: 1,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {matcherStartToolbarButton}
+                      <Typography variant="subtitle2" color="primary">
+                        {companyFileName} — {companies.length.toLocaleString()} row{companies.length !== 1 ? 's' : ''}
+                      </Typography>
+                    </Box>
                     <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                       <AgCompaniesGrid companies={companies} headers={companyHeaders} fillContainer />
                     </Box>
@@ -1449,45 +1470,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                       <Typography variant="subtitle2" color="primary" sx={{ mb: 1 }}>
                         Search details
                       </Typography>
-                      {reasoningSteps != null && reasoningSteps.length > 0 && (
-                        <Accordion
-                          defaultExpanded={false}
-                          sx={{
-                            mb: 1,
-                            borderRadius: 1,
-                            '&:before': { display: 'none' },
-                            border: 1,
-                            borderColor: 'divider',
-                          }}
-                        >
-                          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                            <Typography variant="subtitle2" color="primary">
-                              How the agent matched
-                            </Typography>
-                          </AccordionSummary>
-                          <AccordionDetails sx={{ pt: 0 }}>
-                            <List dense disablePadding>
-                              {reasoningSteps.map((step, i) => (
-                                <ListItem key={i} sx={{ py: 0.25, display: 'block' }}>
-                                  <Typography variant="body2" fontWeight={600} component="span">
-                                    {step.title}
-                                  </Typography>
-                                  {step.detail && (
-                                    <Typography
-                                      variant="body2"
-                                      color="text.secondary"
-                                      component="span"
-                                      sx={{ ml: 0.5 }}
-                                    >
-                                      — {step.detail}
-                                    </Typography>
-                                  )}
-                                </ListItem>
-                              ))}
-                            </List>
-                          </AccordionDetails>
-                        </Accordion>
-                      )}
                       <Accordion
                         defaultExpanded
                         sx={{
@@ -1559,7 +1541,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                   runLog={matcherRunLog}
                   onSelectionChange={handleMatcherSelectionChange}
                   onRun={handleRunMatcher}
-                  onApply={handleApplyMatcher}
                 />
               </Box>
             )}
