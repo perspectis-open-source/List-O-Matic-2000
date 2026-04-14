@@ -16,7 +16,9 @@
     "build-storybook": "storybook build",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "generate-contacts": "node scripts/generate-contacts.js"
+    "generate-contacts": "node scripts/generate-contacts.js",
+    "generate-contacts:legacy": "node scripts/generate-contacts.js --legacy",
+    "build-off-list-seed": "node scripts/build-off-list-seed.mjs"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

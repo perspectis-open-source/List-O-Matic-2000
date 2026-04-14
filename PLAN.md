@@ -321,7 +321,7 @@ server/
 
 **Script**
 
-- client/scripts/generate-contacts.js (ESM). Output: client/public/demo-contacts-25k.csv. Use path and fs; __dirname via path.dirname(fileURLToPath(import.meta.url)).
+- client/scripts/generate-contacts.js (ESM). Output: client/public/demo-contacts-5k.csv (sparse default). Use path and fs; __dirname via path.dirname(fileURLToPath(import.meta.url)).
 
 **Spec**
 

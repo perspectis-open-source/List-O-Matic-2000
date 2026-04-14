@@ -19,7 +19,15 @@ export type MatchCompaniesUsageTotals = {
 
 export type MatchCompaniesResponse = {
   results: MatchCompanyResult[]
-  meta?: { llmSubBatches?: number; usage?: MatchCompaniesUsageTotals; model?: string }
+  meta?: {
+    llmSubBatches?: number
+    usage?: MatchCompaniesUsageTotals
+    model?: string
+    /** True when results were served from a disk snapshot (no LLM calls). */
+    fromSnapshot?: boolean
+    /** Rows resolved from the on-disk list snapshot without LLM (partial runs include this). */
+    snapshotCacheHits?: number
+  }
 }
 
 /** One NDJSON `progress` line from POST /api/match-companies when `streamProgress: true`. */

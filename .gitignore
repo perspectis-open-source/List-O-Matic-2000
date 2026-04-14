@@ -41,3 +41,6 @@ storybook-static/
 
 # OSS export artifact
 .oss-export/
+
+# Matcher disk snapshots (company + contact match results; optional to commit for offline demos)
+server/data/matcher-snapshots/
