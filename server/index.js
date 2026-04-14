@@ -549,10 +549,22 @@ function pickMatchFromParentMaps(raw, contactParent, parentByCanon, canonicalNam
   return { raw, match, alternates }
 }
 
+/** Shared by step 1 (canonical list) and step 2 (contact raws) so parentCompany strings align in step 3. */
+const MATCHER_LLM_PARENT_COMPANY_RULES = `Rules for every "parentCompany" value (identical meaning in all tasks):
+- Output exactly one ultimate parent or top holding company—the entity at the top of the ownership chain—not a subsidiary, division, regional operating company, or consumer/product brand when a single clearer ultimate parent is well known.
+- Use the full legal / filing-style name as used in SEC or equivalent regulatory filings when you know it (include standard corporate suffixes like Inc., Ltd., PLC when that is the filing name). Never use stock tickers or trading symbols.
+- Do not use a division, segment, or brand name as parentCompany when that unit rolls up to a well-known ultimate parent (example: for names or imports referring to AWS or Amazon Web Services, parentCompany must be the ultimate Amazon parent legal name such as Amazon.com, Inc.—not "AWS", not "Amazon Web Services" alone).
+- For the same ultimate parent, use one consistent filing-style phrasing across every entry in this response (do not mix a division name on one row and the holding company on another).`
+
+const MATCHER_LLM_SYSTEM_PARENT =
+  'You infer ultimate parent companies for downstream string matching. Every parentCompany must follow the user message rules exactly (one full legal ultimate parent, no tickers, no division-only labels when a filing-style parent is known). Return only valid JSON matching the user schema.'
+
 async function inferParentsForCanonicalListBatch(openai, namesBatch) {
   const set = new Set(namesBatch)
   const listStr = namesBatch.join('\n')
   const userPrompt = `Each line below is one exact company name from the user's companies file (closed list). For each line, infer the single real ultimate parent company—the major operating or holding company that owns or controls that entity (use well-known corporate structures; consumer brands often roll up to the major beverage/CPG conglomerate when that is the real parent).
+
+${MATCHER_LLM_PARENT_COMPANY_RULES}
 
 Output JSON: { "entries": [ { "name": "<exact line from input>", "parentCompany": "<inferred parent>" } ] }
 Include one entry per input line. "name" must copy the input line exactly.
@@ -565,8 +577,7 @@ ${listStr}`
     messages: [
       {
         role: 'system',
-        content:
-          'You infer ultimate parent companies for official list names. Return only valid JSON matching the user schema.',
+        content: MATCHER_LLM_SYSTEM_PARENT,
       },
       { role: 'user', content: userPrompt },
     ],
@@ -602,7 +613,9 @@ async function inferParentsForContactRawsBatch(openai, itemsBatch) {
   const itemsDesc = itemsBatch
     .map((it) => JSON.stringify({ raw: it.raw, topCandidates: it.topCandidates }))
     .join('\n')
-  const userPrompt = `Each line is a JSON object with "raw" (contact import string) and optional "topCandidates" hints. For each object, infer the single real ultimate parent company for that entity (major operating/holding company).
+  const userPrompt = `Each line is a JSON object with "raw" (contact import string) and optional "topCandidates" hints. For each object, infer the single real ultimate parent company for that entity (major operating/holding company). Import strings may be noisy shorthand (e.g. acronyms, misspellings, or division names like "AWS"); still resolve to the same filing-style ultimate parent you would use for the official list names in the other batch.
+
+${MATCHER_LLM_PARENT_COMPANY_RULES}
 
 Output JSON: { "entries": [ { "raw": "<exact raw from input>", "parentCompany": "<inferred parent>" } ] }
 Every input object must appear exactly once; "raw" must match exactly.
@@ -615,8 +628,7 @@ ${itemsDesc}`
     messages: [
       {
         role: 'system',
-        content:
-          'You infer ultimate parent companies for noisy contact import strings. Return only valid JSON matching the user schema.',
+        content: MATCHER_LLM_SYSTEM_PARENT,
       },
       { role: 'user', content: userPrompt },
     ],
