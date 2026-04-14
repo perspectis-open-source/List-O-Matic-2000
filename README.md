@@ -77,13 +77,12 @@ Mirror automation:
 
 ## Demo contact file
 
-A 25,000-row demo CSV is generated and saved at **`client/public/demo-contacts-25k.csv`**. To regenerate:
+Running **`cd client && npm run generate-contacts`** writes:
 
-```bash
-cd client && npm run generate-contacts
-```
+- **`client/public/demo-contacts-25k.csv`** — 25,000 rows; columns `First`, `Last`, `Company`, `Title`, `Email`, `City`, `State`, `Zip`, `Country`. Same 25×1,000 structure (15 “C” names, etc.).
+- **`client/public/demo-companies-500.csv`** — 500 rows; columns `Name`, `Client Number`, `Open Date`, `Status`, `Client Originating Attorney`. The first **25** rows are **canonical** client names (one per contact group). Contacts use **only spelling/brand variants** of those clients in `Company`, not the canonical string. Rows **26–500** are **real S&P 500 company names** from [`client/scripts/data/sp500-constituents.csv`](client/scripts/data/sp500-constituents.csv) (Open Database License), chosen so the `Name` does not exactly match any contact `Company` string or canonical name.
 
-Then upload that file in the app (or open the app and use "Upload file" to select it). The file has 25 companies (1,000 contacts each), with 15 companies whose names start with "C" (including Coke, Colgate, Costco, Cadbury, etc.) for the Coke-search demo.
+Upload via **Import contacts** / **Import companies** on the start screen.
 
 ## Env (server)
 

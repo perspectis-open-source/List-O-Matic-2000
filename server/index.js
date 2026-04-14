@@ -1,6 +1,6 @@
 /**
  * @file index.js
- * @description Marketing Demo API: POST /api/chat — LLM-backed company name matching; no PII.
+ * @description Marketing Demo API: POST /api/chat (Normalizer), POST /api/match-companies (Matcher LLM assist); no contact PII.
  *
  * Logic:
  * 1. Take the input company name (from the user's selection).
@@ -10,10 +10,16 @@
  * 3. Return that list of variants. The frontend uses it to find all contact records
  *    where Company is in the variant list (no PII is sent to the server).
  *
+ * Contact Company Matcher (/api/match-companies): batched three-step pipeline — (1) infer parent per
+ * canonical list row (cached by list fingerprint), (2) infer parent per contact raw, (3) deterministic
+ * match on aligned parents; optional LLM fallback for rows with no parent match. Normalizer still uses
+ * gatherMatchesForCompanyQuery (agent + list batches).
+ *
  * Request: { messages, uniqueCompanyNames }. Response: { matchingCompanyNames, explanation? }.
  * See PLAN.md for full spec.
  */
 import 'dotenv/config'
+import crypto from 'node:crypto'
 import express from 'express'
 import cors from 'cors'
 import OpenAI from 'openai'
@@ -98,6 +104,30 @@ function batched(arr, size) {
   const out = []
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
   return out
+}
+
+/**
+ * Run async fn over items with at most `limit` calls in flight (order of results matches `items`).
+ * @param {(completed: number, total: number) => void} [onEachDone] Fires after each item completes (completed is 1..n).
+ */
+async function parallelMapLimit(items, limit, fn, onEachDone) {
+  const n = items.length
+  if (n === 0) return []
+  const results = new Array(n)
+  let next = 0
+  let finished = 0
+  const workers = Math.max(1, Math.min(limit, n))
+  async function worker() {
+    while (true) {
+      const i = next++
+      if (i >= n) break
+      results[i] = await fn(items[i], i)
+      finished += 1
+      onEachDone?.(finished, n)
+    }
+  }
+  await Promise.all(Array.from({ length: workers }, () => worker()))
+  return results
 }
 
 // Legal suffixes (longer forms first so "Inc." is stripped before "Inc")
@@ -195,14 +225,15 @@ async function askLLM(openai, batchNames, inputCompanyQuery, refinementContext =
   })
 
   const text = completion.choices?.[0]?.message?.content?.trim()
+  const emptyUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
   if (!text) {
     console.warn('[askLLM] Empty LLM response')
-    return { matchingCompanyNames: [], parentCompany: null, explanation: '', reasoningSteps: [] }
+    return { matchingCompanyNames: [], parentCompany: null, explanation: '', reasoningSteps: [], usage: emptyUsage }
   }
   const parsed = parseLLMJson(text)
   if (!parsed || typeof parsed !== 'object') {
     console.warn('[askLLM] Failed to parse LLM JSON')
-    return { matchingCompanyNames: [], parentCompany: null, explanation: '', reasoningSteps: [] }
+    return { matchingCompanyNames: [], parentCompany: null, explanation: '', reasoningSteps: [], usage: emptyUsage }
   }
   const inferredBrands = Array.isArray(parsed.inferredBrands) ? parsed.inferredBrands : []
   if (inferredBrands.length === 0) {
@@ -224,6 +255,13 @@ async function askLLM(openai, batchNames, inputCompanyQuery, refinementContext =
     parentCompany,
     explanation: typeof parsed.explanation === 'string' ? parsed.explanation : '',
     reasoningSteps: steps,
+    usage: completion.usage
+      ? {
+          prompt_tokens: completion.usage.prompt_tokens ?? 0,
+          completion_tokens: completion.usage.completion_tokens ?? 0,
+          total_tokens: completion.usage.total_tokens ?? 0,
+        }
+      : { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
   }
   console.log('[askLLM] result:', { parentCompany: result.parentCompany, matchingCount: result.matchingCompanyNames.length, explanation: result.explanation?.slice(0, 80) })
   return result
@@ -247,6 +285,7 @@ async function runAgentLoop(openai, batchNames, inputCompanyQuery, refinementCon
     { role: 'user', content: userPrompt },
   ]
   let iterations = 0
+  const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
 
   while (iterations < MAX_AGENT_ITERATIONS) {
     const completion = await openai.chat.completions.create({
@@ -255,6 +294,12 @@ async function runAgentLoop(openai, batchNames, inputCompanyQuery, refinementCon
       tools: [SEARCH_WEB_TOOL],
       max_tokens: 4000,
     })
+    const u = completion.usage
+    if (u) {
+      usage.prompt_tokens += u.prompt_tokens ?? 0
+      usage.completion_tokens += u.completion_tokens ?? 0
+      usage.total_tokens += u.total_tokens ?? 0
+    }
     const msg = completion.choices?.[0]?.message
     if (!msg) break
     messages.push(msg)
@@ -304,6 +349,7 @@ async function runAgentLoop(openai, batchNames, inputCompanyQuery, refinementCon
           parentCompany,
           explanation: typeof parsed.explanation === 'string' ? parsed.explanation : '',
           reasoningSteps: steps,
+          usage,
         }
         console.log('[runAgentLoop] result:', { parentCompany: result.parentCompany, matchingCount: result.matchingCompanyNames.length })
         return result
@@ -317,7 +363,62 @@ async function runAgentLoop(openai, batchNames, inputCompanyQuery, refinementCon
     parentCompany: null,
     explanation: 'Agent did not complete in time.',
     reasoningSteps: [],
+    usage,
   }
+}
+
+/**
+ * Same multi-batch + agent flow as Contact Company Normalizer: scan nameList for every line that
+ * belongs to the entity implied by inputCompanyQuery (parent, brands, subsidiaries, typos).
+ */
+async function gatherMatchesForCompanyQuery(openai, rawNameList, inputCompanyQuery, refinementContext = null) {
+  const nameList = [...new Set(rawNameList.map((n) => String(n).trim()).filter(Boolean))]
+  const nameSet = new Set(nameList)
+  const lowerToCanonical = new Map()
+  for (const n of nameList) {
+    const t = String(n).trim()
+    if (t) lowerToCanonical.set(t.toLowerCase(), t)
+  }
+  const batches = batched(nameList, BATCH_SIZE)
+  const allMatches = []
+  let explanation = ''
+  let reasoningSteps = []
+  let parentCompany = null
+  const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+  let llmCallCount = 0
+
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i]
+    const result =
+      i === 0
+        ? await runAgentLoop(openai, batch, inputCompanyQuery, refinementContext)
+        : await askLLM(openai, batch, inputCompanyQuery, refinementContext)
+    llmCallCount++
+    if (result.usage) {
+      usage.prompt_tokens += result.usage.prompt_tokens ?? 0
+      usage.completion_tokens += result.usage.completion_tokens ?? 0
+      usage.total_tokens += result.usage.total_tokens ?? 0
+    }
+    const matching = Array.isArray(result.matchingCompanyNames) ? result.matchingCompanyNames : []
+    for (const name of matching) {
+      const s = String(name).trim()
+      if (!s) continue
+      if (nameSet.has(s)) {
+        allMatches.push(s)
+      } else {
+        const canonical = lowerToCanonical.get(s.toLowerCase())
+        if (canonical) allMatches.push(canonical)
+      }
+    }
+    if (result.explanation) explanation = result.explanation
+    if (result.parentCompany && typeof result.parentCompany === 'string') parentCompany = result.parentCompany.trim()
+    if (Array.isArray(result.reasoningSteps) && result.reasoningSteps.length > 0 && reasoningSteps.length === 0) {
+      reasoningSteps = result.reasoningSteps
+    }
+  }
+  if (parentCompany) addParentSuffixVariants(nameList, parentCompany, allMatches)
+  const matchingCompanyNames = [...new Set(allMatches)]
+  return { matchingCompanyNames, parentCompany, explanation, reasoningSteps, llmCallCount, usage }
 }
 
 app.post('/api/chat', async (req, res, next) => {
@@ -339,44 +440,12 @@ app.post('/api/chat', async (req, res, next) => {
     }
 
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY })
-    const nameSet = new Set(uniqueCompanyNames)
-    const nameList = [...nameSet]
-    const lowerToCanonical = new Map()
-    for (const n of nameList) {
-      const t = String(n).trim()
-      if (t) lowerToCanonical.set(t.toLowerCase(), t)
-    }
-    const allMatches = []
-    let explanation = ''
-    let reasoningSteps = []
-    let parentCompany = null
-
-    const batches = batched(uniqueCompanyNames, BATCH_SIZE)
-    for (let i = 0; i < batches.length; i++) {
-      const batch = batches[i]
-      const result =
-        i === 0
-          ? await runAgentLoop(openai, batch, inputCompanyQuery, refinementContext)
-          : await askLLM(openai, batch, inputCompanyQuery, refinementContext)
-      const matching = Array.isArray(result.matchingCompanyNames) ? result.matchingCompanyNames : []
-      for (const name of matching) {
-        const s = String(name).trim()
-        if (!s) continue
-        if (nameSet.has(s)) {
-          allMatches.push(s)
-        } else {
-          const canonical = lowerToCanonical.get(s.toLowerCase())
-          if (canonical) allMatches.push(canonical)
-        }
-      }
-      if (result.explanation) explanation = result.explanation
-      if (result.parentCompany && typeof result.parentCompany === 'string') parentCompany = result.parentCompany.trim()
-      if (Array.isArray(result.reasoningSteps) && result.reasoningSteps.length > 0 && reasoningSteps.length === 0) {
-        reasoningSteps = result.reasoningSteps
-      }
-    }
-    if (parentCompany) addParentSuffixVariants(nameList, parentCompany, allMatches)
-    const matchingCompanyNames = [...new Set(allMatches)]
+    const {
+      matchingCompanyNames,
+      parentCompany,
+      explanation,
+      reasoningSteps,
+    } = await gatherMatchesForCompanyQuery(openai, uniqueCompanyNames, inputCompanyQuery, refinementContext)
     const payload = { matchingCompanyNames, explanation: explanation || undefined }
     if (parentCompany) payload.parentCompany = parentCompany
     if (reasoningSteps.length > 0) payload.reasoningSteps = reasoningSteps
@@ -387,6 +456,507 @@ app.post('/api/chat', async (req, res, next) => {
     if (err.code === 'ETIMEDOUT') return res.status(504).json({ error: 'Request timeout' })
     if (err.message?.includes('rate')) return res.status(429).json({ error: 'Rate limit exceeded' })
     console.error('[POST /api/chat]', err.message || err)
+    next(err)
+  }
+})
+
+const MATCH_MAX_CANONICAL = 2500
+const MATCH_MAX_ITEMS_PER_REQUEST = 200
+/** Max import strings per single matcher LLM call (balance cost vs. payload size). */
+const MATCH_LLM_BATCH = 50
+/**
+ * Max concurrent OpenAI completions for matcher sub-batches (step 1 / 2 / fallback).
+ * Override with env MATCH_LLM_CONCURRENCY (1–12). Higher = faster cold start, more rate-limit risk.
+ */
+const MATCH_LLM_CONCURRENCY = Math.min(
+  12,
+  Math.max(1, Number.parseInt(process.env.MATCH_LLM_CONCURRENCY ?? '', 10) || 5),
+)
+/** Chat model for /api/match-companies (client uses this for cost estimates). */
+const MATCH_COMPANIES_MODEL = 'gpt-4o-mini'
+
+/** LRU cache: fingerprint of canonical list → Map(canonical Name → inferred parent string). */
+const PARENT_BY_CANON_CACHE_MAX = 16
+const parentByCanonCache = new Map()
+
+function canonicalNamesFingerprint(canonicalNames) {
+  const sorted = [...canonicalNames].sort((a, b) => a.localeCompare(b))
+  return crypto.createHash('sha256').update(sorted.join('\0'), 'utf8').digest('hex')
+}
+
+function parentCacheGet(fingerprint) {
+  const row = parentByCanonCache.get(fingerprint)
+  if (!row) return null
+  parentByCanonCache.delete(fingerprint)
+  parentByCanonCache.set(fingerprint, row)
+  return row
+}
+
+function parentCacheSet(fingerprint, parentByCanon) {
+  if (parentByCanonCache.has(fingerprint)) parentByCanonCache.delete(fingerprint)
+  else if (parentByCanonCache.size >= PARENT_BY_CANON_CACHE_MAX) {
+    const oldest = parentByCanonCache.keys().next().value
+    parentByCanonCache.delete(oldest)
+  }
+  parentByCanonCache.set(fingerprint, parentByCanon)
+}
+
+function accumulateMatcherUsage(totals, u) {
+  if (!u) return
+  totals.promptTokens += u.prompt_tokens ?? 0
+  totals.completionTokens += u.completion_tokens ?? 0
+  totals.totalTokens += u.total_tokens ?? 0
+}
+
+function mergeMatcherUsageTotals(into, from) {
+  into.promptTokens += from.promptTokens
+  into.completionTokens += from.completionTokens
+  into.totalTokens += from.totalTokens
+}
+
+function normalizeParentLabel(s) {
+  if (!s || typeof s !== 'string') return ''
+  return s.normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/** Loose alignment so LLM paraphrases of the same parent still match. */
+function parentLabelsAlign(listParent, contactParent) {
+  const a = normalizeParentLabel(listParent)
+  const b = normalizeParentLabel(contactParent)
+  if (!a || !b) return false
+  if (a === b) return true
+  const tokenize = (x) =>
+    [...new Set(x.split(/[^a-z0-9]+/).filter((t) => t.length > 0))].sort().join(' ')
+  if (tokenize(a) === tokenize(b)) return true
+  if (a.length >= 6 && b.length >= 6 && (a.includes(b) || b.includes(a))) return true
+  return false
+}
+
+function pickMatchFromParentMaps(raw, contactParent, parentByCanon, canonicalNames, canonSet) {
+  const cp = typeof contactParent === 'string' ? contactParent.trim() : ''
+  if (!cp) return { raw, match: null, alternates: [] }
+  const candidates = []
+  for (const name of canonicalNames) {
+    if (!canonSet.has(name)) continue
+    const lp = parentByCanon.get(name) ?? ''
+    if (!parentLabelsAlign(lp, cp)) continue
+    candidates.push(name)
+  }
+  if (candidates.length === 0) return { raw, match: null, alternates: [] }
+  candidates.sort((a, b) => a.length - b.length || a.localeCompare(b))
+  const match = candidates[0]
+  const alternates = [...new Set(candidates.slice(1, 11))]
+  return { raw, match, alternates }
+}
+
+async function inferParentsForCanonicalListBatch(openai, namesBatch) {
+  const set = new Set(namesBatch)
+  const listStr = namesBatch.join('\n')
+  const userPrompt = `Each line below is one exact company name from the user's companies file (closed list). For each line, infer the single real ultimate parent company—the major operating or holding company that owns or controls that entity (use well-known corporate structures; consumer brands often roll up to the major beverage/CPG conglomerate when that is the real parent).
+
+Output JSON: { "entries": [ { "name": "<exact line from input>", "parentCompany": "<inferred parent>" } ] }
+Include one entry per input line. "name" must copy the input line exactly.
+
+Names (one per line):
+${listStr}`
+
+  const completion = await openai.chat.completions.create({
+    model: MATCH_COMPANIES_MODEL,
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You infer ultimate parent companies for official list names. Return only valid JSON matching the user schema.',
+      },
+      { role: 'user', content: userPrompt },
+    ],
+    response_format: { type: 'json_object' },
+    max_tokens: 4000,
+  })
+
+  const text = completion.choices?.[0]?.message?.content?.trim()
+  const parsed = parseLLMJson(text)
+  const arr = parsed?.entries
+  const parentByCanon = new Map()
+  for (const n of namesBatch) parentByCanon.set(n, '')
+  if (Array.isArray(arr)) {
+    for (const e of arr) {
+      const name = typeof e.name === 'string' ? e.name.trim() : ''
+      const parentCompany = typeof e.parentCompany === 'string' ? e.parentCompany.trim() : ''
+      if (name && set.has(name)) parentByCanon.set(name, parentCompany)
+    }
+  }
+  const u = completion.usage
+  const usage = u
+    ? {
+        prompt_tokens: u.prompt_tokens ?? 0,
+        completion_tokens: u.completion_tokens ?? 0,
+        total_tokens: u.total_tokens ?? 0,
+      }
+    : null
+  return { parentByCanon, usage }
+}
+
+async function inferParentsForContactRawsBatch(openai, itemsBatch) {
+  const rawSet = new Set(itemsBatch.map((it) => it.raw))
+  const itemsDesc = itemsBatch
+    .map((it) => JSON.stringify({ raw: it.raw, topCandidates: it.topCandidates }))
+    .join('\n')
+  const userPrompt = `Each line is a JSON object with "raw" (contact import string) and optional "topCandidates" hints. For each object, infer the single real ultimate parent company for that entity (major operating/holding company).
+
+Output JSON: { "entries": [ { "raw": "<exact raw from input>", "parentCompany": "<inferred parent>" } ] }
+Every input object must appear exactly once; "raw" must match exactly.
+
+Items:
+${itemsDesc}`
+
+  const completion = await openai.chat.completions.create({
+    model: MATCH_COMPANIES_MODEL,
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You infer ultimate parent companies for noisy contact import strings. Return only valid JSON matching the user schema.',
+      },
+      { role: 'user', content: userPrompt },
+    ],
+    response_format: { type: 'json_object' },
+    max_tokens: 4000,
+  })
+
+  const text = completion.choices?.[0]?.message?.content?.trim()
+  const parsed = parseLLMJson(text)
+  const arr = parsed?.entries
+  const parentByRaw = new Map()
+  for (const it of itemsBatch) parentByRaw.set(it.raw, '')
+  if (Array.isArray(arr)) {
+    for (const e of arr) {
+      const raw = typeof e.raw === 'string' ? e.raw.trim() : ''
+      const parentCompany = typeof e.parentCompany === 'string' ? e.parentCompany.trim() : ''
+      if (raw && rawSet.has(raw)) parentByRaw.set(raw, parentCompany)
+    }
+  }
+  const u = completion.usage
+  const usage = u
+    ? {
+        prompt_tokens: u.prompt_tokens ?? 0,
+        completion_tokens: u.completion_tokens ?? 0,
+        total_tokens: u.total_tokens ?? 0,
+      }
+    : null
+  return { parentByRaw, usage }
+}
+
+/**
+ * Step 1 (cached) + step 2 + deterministic step 3; LLM fallback batches for unmatched raws.
+ * @param {(ev: { type: 'progress', phase: string, completed?: number, total?: number, cached?: boolean, detail?: string }) => void} [progressSink] NDJSON progress lines for the client.
+ */
+async function runThreeStepMatchCompanies(openai, canonicalNames, items, canonSet, lowerToCanon, progressSink) {
+  const usageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+  let llmSubBatches = 0
+
+  const fp = canonicalNamesFingerprint(canonicalNames)
+  let parentByCanon = parentCacheGet(fp)
+
+  function emitProgress(ev) {
+    progressSink?.({ type: 'progress', ...ev })
+  }
+
+  async function runStep1Batches() {
+    const local = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+    let batches = 0
+    const map = new Map()
+    const chunks = batched(canonicalNames, MATCH_LLM_BATCH)
+    const totalChunks = chunks.length
+    if (totalChunks === 0) return { map, local, batches }
+    emitProgress({ phase: 'step1', completed: 0, total: totalChunks, cached: false })
+    const parts = await parallelMapLimit(
+      chunks,
+      MATCH_LLM_CONCURRENCY,
+      (batch) => inferParentsForCanonicalListBatch(openai, batch),
+      (done, tot) => {
+        emitProgress({ phase: 'step1', completed: done, total: tot, cached: false })
+      },
+    )
+    for (const { parentByCanon: chunk, usage } of parts) {
+      accumulateMatcherUsage(local, usage)
+      batches += 1
+      for (const [k, v] of chunk) map.set(k, v)
+    }
+    return { map, local, batches }
+  }
+
+  async function runStep2Batches() {
+    const local = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+    let batches = 0
+    const map = new Map()
+    const chunks = batched(items, MATCH_LLM_BATCH)
+    const totalChunks = chunks.length
+    if (totalChunks === 0) return { map, local, batches }
+    emitProgress({ phase: 'step2', completed: 0, total: totalChunks })
+    const parts = await parallelMapLimit(
+      chunks,
+      MATCH_LLM_CONCURRENCY,
+      (batch) => inferParentsForContactRawsBatch(openai, batch),
+      (done, tot) => {
+        emitProgress({ phase: 'step2', completed: done, total: tot })
+      },
+    )
+    for (const { parentByRaw: chunk, usage } of parts) {
+      accumulateMatcherUsage(local, usage)
+      batches += 1
+      for (const [k, v] of chunk) map.set(k, v)
+    }
+    return { map, local, batches }
+  }
+
+  let parentByRaw
+  if (parentByCanon) {
+    emitProgress({ phase: 'step1', completed: 1, total: 1, cached: true })
+    const s2 = await runStep2Batches()
+    parentByRaw = s2.map
+    mergeMatcherUsageTotals(usageTotals, s2.local)
+    llmSubBatches += s2.batches
+  } else {
+    const [s1, s2] = await Promise.all([runStep1Batches(), runStep2Batches()])
+    parentByCanon = s1.map
+    parentByRaw = s2.map
+    parentCacheSet(fp, parentByCanon)
+    mergeMatcherUsageTotals(usageTotals, s1.local)
+    mergeMatcherUsageTotals(usageTotals, s2.local)
+    llmSubBatches += s1.batches + s2.batches
+  }
+
+  emitProgress({
+    phase: 'step3',
+    completed: 1,
+    total: 1,
+    detail: 'Matching on inferred parent labels (no model)',
+  })
+
+  const byRaw = new Map()
+  for (const it of items) {
+    const inferred = pickMatchFromParentMaps(
+      it.raw,
+      parentByRaw.get(it.raw) ?? '',
+      parentByCanon,
+      canonicalNames,
+      canonSet,
+    )
+    byRaw.set(it.raw, inferred)
+  }
+
+  const needFallback = items.filter((it) => !byRaw.get(it.raw)?.match)
+  const fallbackChunks = batched(needFallback, MATCH_LLM_BATCH).filter((b) => b.length > 0)
+  if (fallbackChunks.length > 0) {
+    emitProgress({ phase: 'fallback', completed: 0, total: fallbackChunks.length })
+    const fbParts = await parallelMapLimit(
+      fallbackChunks,
+      MATCH_LLM_CONCURRENCY,
+      (batch) => askMatchCompaniesLLM(openai, canonicalNames, batch, canonSet, lowerToCanon),
+      (done, tot) => {
+        emitProgress({ phase: 'fallback', completed: done, total: tot })
+      },
+    )
+    for (const { results: part, usage } of fbParts) {
+      accumulateMatcherUsage(usageTotals, usage)
+      llmSubBatches += 1
+      for (const r of part) byRaw.set(r.raw, r)
+    }
+  }
+
+  const results = items.map((it) => byRaw.get(it.raw) ?? { raw: it.raw, match: null, alternates: [] })
+  return { results, usageTotals, llmSubBatches }
+}
+
+function validateMatchCompaniesBody(body) {
+  if (!body || typeof body !== 'object') return { ok: false, error: 'Invalid body' }
+  const { canonicalNames, items } = body
+  if (!Array.isArray(canonicalNames)) return { ok: false, error: 'canonicalNames must be an array' }
+  if (!Array.isArray(items)) return { ok: false, error: 'items must be an array' }
+  const cn = canonicalNames
+    .filter((n) => typeof n === 'string' && n.trim() !== '')
+    .map((n) => n.trim())
+  if (cn.length === 0) return { ok: false, error: 'canonicalNames must be non-empty' }
+  if (cn.length > MATCH_MAX_CANONICAL) {
+    return { ok: false, error: `Too many canonical names (max ${MATCH_MAX_CANONICAL})` }
+  }
+  const canonSet = new Set(cn)
+  const lowerToCanon = new Map()
+  for (const name of cn) lowerToCanon.set(name.toLowerCase(), name)
+
+  const cleaned = []
+  const seenRaw = new Set()
+  for (const it of items) {
+    if (!it || typeof it !== 'object') continue
+    const raw = typeof it.raw === 'string' ? it.raw.trim() : ''
+    if (!raw || seenRaw.has(raw)) continue
+    seenRaw.add(raw)
+    const topCandidates = Array.isArray(it.topCandidates)
+      ? [...new Set(it.topCandidates.filter((x) => typeof x === 'string').map((x) => x.trim()).filter(Boolean))].slice(0, 12)
+      : []
+    cleaned.push({ raw, topCandidates })
+    if (cleaned.length >= MATCH_MAX_ITEMS_PER_REQUEST) break
+  }
+  return { ok: true, canonicalNames: cn, canonSet, lowerToCanon, items: cleaned }
+}
+
+function sanitizeMatchResults(parsedResults, canonSet, lowerToCanon, items) {
+  const byRaw = new Map()
+  if (!Array.isArray(parsedResults)) {
+    return items.map((it) => ({ raw: it.raw, match: null, alternates: [] }))
+  }
+  for (const r of parsedResults) {
+    const raw = typeof r.raw === 'string' ? r.raw.trim() : ''
+    if (!raw) continue
+    let match = r.match != null && typeof r.match === 'string' ? r.match.trim() : null
+    if (match === '') match = null
+    if (match && !canonSet.has(match)) {
+      const fix = lowerToCanon.get(match.toLowerCase())
+      match = fix ?? null
+    }
+    if (match && !canonSet.has(match)) match = null
+    let alternates = Array.isArray(r.alternates)
+      ? r.alternates
+          .filter((x) => typeof x === 'string' && canonSet.has(String(x).trim()))
+          .map((x) => String(x).trim())
+      : []
+    alternates = [...new Set(alternates)].filter((a) => a !== match)
+    byRaw.set(raw, { raw, match, alternates })
+  }
+  return items.map((it) => byRaw.get(it.raw) ?? { raw: it.raw, match: null, alternates: [] })
+}
+
+/**
+ * One completion per batch: map many import raws → one list Name each (cheap).
+ * Prompts borrow Normalizer-style intent (brands, typos, prefer parent row when in list) without
+ * per-raw agent + list batching.
+ */
+async function askMatchCompaniesLLM(openai, canonicalNames, items, canonSet, lowerToCanon) {
+  const listStr = canonicalNames.join('\n')
+  const itemsDesc = items
+    .map((it) => JSON.stringify({ raw: it.raw, topCandidates: it.topCandidates }))
+    .join('\n')
+  const userPrompt = `Canonical company names from the user's companies file (exact strings). Your "match" MUST be exactly one of these strings or null:\n${listStr}\n\nFor each item, pick the single best canonical row for the raw contact import string, or null if none fit. Use the same mental model as parent-company / brand matching: the import may be a misspelling, shorthand, or a product/consumer brand; infer the intended entity, then choose one list line.\n\nDisambiguation:\n- Product / consumer brands (e.g. beverages): if the list has both a brand-specific line and a clear parent or ultimate operating company line for that brand, prefer the parent as "match" when it is the better rollup. If only the brand line exists in the list, use that line.\n- Fix obvious typos before matching; "match" must be copied exactly from the list.\n- Optional "alternates": other plausible list lines (e.g. brand row when match is parent).\n\nIf topCandidates is non-empty you may use them as hints but may still choose another list name.\n\nItems (one JSON object per line):\n${itemsDesc}\n\nReturn JSON: { "results": [ { "raw": "<exact raw>", "match": "<exact canonical from list or null>", "alternates": [] } ] }\nEvery input raw must appear exactly once in results with the same "raw" string.`
+
+  const completion = await openai.chat.completions.create({
+    model: MATCH_COMPANIES_MODEL,
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You map noisy import strings to one companies-file Name per row (closed list). Infer brands, typos, and parents like the Normalizer would, but output only one "match" per item—exact list string or null. Prefer a parent/ultimate operating company list row over a brand-only row when both exist and parent is the better rollup. Return only valid JSON.',
+      },
+      { role: 'user', content: userPrompt },
+    ],
+    response_format: { type: 'json_object' },
+    max_tokens: 4000,
+  })
+
+  const text = completion.choices?.[0]?.message?.content?.trim()
+  const parsed = parseLLMJson(text)
+  const arr = parsed?.results
+  const results = sanitizeMatchResults(arr, canonSet, lowerToCanon, items)
+  const u = completion.usage
+  const usage = u
+    ? {
+        prompt_tokens: u.prompt_tokens ?? 0,
+        completion_tokens: u.completion_tokens ?? 0,
+        total_tokens: u.total_tokens ?? 0,
+      }
+    : null
+  return { results, usage }
+}
+
+function matchCompaniesMeta(llmSubBatches, usageTotals) {
+  return {
+    model: MATCH_COMPANIES_MODEL,
+    llmSubBatches,
+    usage: usageTotals,
+  }
+}
+
+app.post('/api/match-companies', async (req, res, next) => {
+  const streamProgress = req.body && req.body.streamProgress === true
+  try {
+    const validated = validateMatchCompaniesBody(req.body)
+    if (!validated.ok) {
+      return res.status(400).json({ error: validated.error })
+    }
+    const { canonicalNames, canonSet, lowerToCanon, items } = validated
+    if (items.length === 0) {
+      const emptyMeta = matchCompaniesMeta(0, { promptTokens: 0, completionTokens: 0, totalTokens: 0 })
+      if (streamProgress) {
+        res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
+        res.setHeader('Cache-Control', 'no-cache')
+        res.write(`${JSON.stringify({ type: 'complete', results: [], meta: emptyMeta })}\n`)
+        return res.end()
+      }
+      return res.status(200).json({
+        results: [],
+        meta: emptyMeta,
+      })
+    }
+
+    if (!OPENAI_API_KEY) {
+      return res.status(503).json({ error: 'LLM not configured (OPENAI_API_KEY missing)' })
+    }
+
+    const openai = new OpenAI({ apiKey: OPENAI_API_KEY })
+
+    const run = async (progressSink) =>
+      runThreeStepMatchCompanies(openai, canonicalNames, items, canonSet, lowerToCanon, progressSink)
+
+    if (streamProgress) {
+      res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
+      res.setHeader('Cache-Control', 'no-cache')
+      res.setHeader('X-Accel-Buffering', 'no')
+      try {
+        const { results: allResults, usageTotals, llmSubBatches } = await run((ev) => {
+          res.write(`${JSON.stringify(ev)}\n`)
+        })
+        console.log('[POST /api/match-companies]', {
+          items: items.length,
+          llmSubBatches,
+          tokens: usageTotals.totalTokens,
+          stream: true,
+        })
+        res.write(
+          `${JSON.stringify({
+            type: 'complete',
+            results: allResults,
+            meta: matchCompaniesMeta(llmSubBatches, usageTotals),
+          })}\n`,
+        )
+        return res.end()
+      } catch (err) {
+        const code = err.status === 429 || err.message?.includes('rate') ? 429 : err.code === 'ETIMEDOUT' ? 504 : 500
+        const msg =
+          code === 429
+            ? 'Rate limit exceeded'
+            : code === 504
+              ? 'Request timeout'
+              : (err.message && String(err.message).trim()) || 'Internal server error'
+        res.write(`${JSON.stringify({ type: 'error', error: msg, status: code })}\n`)
+        return res.end()
+      }
+    }
+
+    const { results: allResults, usageTotals, llmSubBatches } = await run(undefined)
+    console.log('[POST /api/match-companies]', {
+      items: items.length,
+      llmSubBatches,
+      tokens: usageTotals.totalTokens,
+    })
+    return res.status(200).json({
+      results: allResults,
+      meta: matchCompaniesMeta(llmSubBatches, usageTotals),
+    })
+  } catch (err) {
+    if (err.status === 429) return res.status(429).json({ error: 'Rate limit exceeded' })
+    if (err.code === 'ETIMEDOUT') return res.status(504).json({ error: 'Request timeout' })
+    if (err.message?.includes('rate')) return res.status(429).json({ error: 'Rate limit exceeded' })
+    console.error('[POST /api/match-companies]', err.message || err)
     next(err)
   }
 })
