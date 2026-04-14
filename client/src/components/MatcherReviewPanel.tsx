@@ -25,6 +25,7 @@ import { AgMatcherContactsGrid } from './AgMatcherContactsGrid'
 import type { ContactRow } from '../utils/parseFile'
 import { buildMatcherTableExport } from '../utils/companyMatch'
 import { downloadCsv } from '../utils/exportCsv'
+import { batchProgressBlue, parseBatchLinePrefix } from '../utils/matcherLogHighlight'
 
 export type MatcherRowModel = {
   raw: string
@@ -57,11 +58,15 @@ function splitMatcherLogTimestamp(line: string): { stamp: string; rest: string }
 }
 
 /**
- * Highlight per-batch token totals ("Tokens this request: …") and cost estimates ("Est. $…")
- * in matcher Activity lines. Left-to-right: whichever pattern appears first wins each step.
+ * Highlight per-batch token totals ("Tokens this request: …"), entire-run line
+ * ("LLM tokens (entire matcher run): … total — … prompt + … completion."), and cost estimates ("Est. $…").
+ * Left-to-right: whichever pattern appears first wins each step.
  */
 function highlightMatcherLogRest(text: string, tokensColor: string, usdColor: string): ReactNode {
   const tokenRe = /Tokens this request:\s*[\d,]+/
+  /** Full sentence from App.tsx (em dash — before prompt count). */
+  const entireRunRe =
+    /LLM tokens \(entire matcher run\): \d[\d,]* total — \d[\d,]* prompt \+ \d[\d,]* completion\./
   const usdRe = /Est\.\s*(\$[\d,]+(?:\.\d+)?)/
 
   const nodes: ReactNode[] = []
@@ -70,18 +75,34 @@ function highlightMatcherLogRest(text: string, tokensColor: string, usdColor: st
 
   while (remaining.length > 0) {
     const tokenMatch = remaining.match(tokenRe)
+    const entireRunMatch = remaining.match(entireRunRe)
     const usdMatch = remaining.match(usdRe)
     const tokenIdx = tokenMatch ? remaining.indexOf(tokenMatch[0]) : -1
+    const entireRunIdx = entireRunMatch ? remaining.indexOf(entireRunMatch[0]) : -1
     const usdIdx = usdMatch ? remaining.indexOf(usdMatch[0]) : -1
 
-    const pickToken = tokenIdx !== -1 && (usdIdx === -1 || tokenIdx <= usdIdx)
+    type Pick = 'token' | 'entireRun' | 'usd' | 'none'
+    let pick: Pick = 'none'
+    let bestIdx = Infinity
+    if (tokenIdx !== -1 && tokenIdx < bestIdx) {
+      pick = 'token'
+      bestIdx = tokenIdx
+    }
+    if (entireRunIdx !== -1 && entireRunIdx < bestIdx) {
+      pick = 'entireRun'
+      bestIdx = entireRunIdx
+    }
+    if (usdIdx !== -1 && usdIdx < bestIdx) {
+      pick = 'usd'
+      bestIdx = usdIdx
+    }
 
-    if (!pickToken && usdIdx === -1) {
+    if (pick === 'none') {
       nodes.push(remaining)
       break
     }
 
-    if (pickToken) {
+    if (pick === 'token') {
       nodes.push(remaining.slice(0, tokenIdx))
       nodes.push(
         <Box component="span" key={`tok-${key++}`} sx={{ color: tokensColor, fontWeight: 600 }}>
@@ -89,17 +110,20 @@ function highlightMatcherLogRest(text: string, tokensColor: string, usdColor: st
         </Box>,
       )
       remaining = remaining.slice(tokenIdx + tokenMatch![0].length)
+    } else if (pick === 'entireRun') {
+      nodes.push(remaining.slice(0, entireRunIdx))
+      nodes.push(
+        <Box component="span" key={`run-${key++}`} sx={{ color: tokensColor, fontWeight: 600 }}>
+          {entireRunMatch![0]}
+        </Box>,
+      )
+      remaining = remaining.slice(entireRunIdx + entireRunMatch![0].length)
     } else {
       const full = usdMatch![0]
-      const amount = usdMatch![1]
-      const prefix = full.slice(0, full.length - amount.length)
       nodes.push(remaining.slice(0, usdIdx))
       nodes.push(
-        <Box component="span" key={`usd-${key++}`}>
-          {prefix}
-          <Box component="span" sx={{ color: usdColor, fontWeight: 600 }}>
-            {amount}
-          </Box>
+        <Box component="span" key={`usd-${key++}`} sx={{ color: usdColor, fontWeight: 600 }}>
+          {full}
         </Box>,
       )
       remaining = remaining.slice(usdIdx + full.length)
@@ -154,10 +178,38 @@ export function MatcherReviewPanel({
   const theme = useTheme()
   /** Deep green in light mode (readable on pale backgrounds); neon in dark mode. */
   const logTimestampColor = theme.palette.mode === 'light' ? '#166534' : '#39ff14'
-  /** Blue for "Tokens this request: …" in batch log lines. */
-  const logTokensColor = theme.palette.mode === 'light' ? '#1d4ed8' : '#60a5fa'
+  /** Blue for "Tokens this request: …", batch /total, and end of Batch i ramp (darker for contrast). */
+  const logTokensColor = theme.palette.mode === 'light' ? '#1e40af' : '#2563eb'
   /** Red for estimated USD in log lines (readable in light and dark). */
   const logCostColor = theme.palette.mode === 'light' ? '#b91c1c' : '#f87171'
+
+  const renderMatcherLogRest = useCallback(
+    (rest: string) => {
+      const batch = parseBatchLinePrefix(rest)
+      if (batch) {
+        const batchBlue = batchProgressBlue(
+          batch.batchIndex,
+          batch.batchTotal,
+          logTokensColor,
+          theme.palette.mode,
+        )
+        return (
+          <>
+            <Box component="span" sx={{ color: batchBlue, fontWeight: 600 }}>
+              Batch {batch.batchIndex}
+            </Box>
+            <Box component="span" sx={{ color: logTokensColor, fontWeight: 600 }}>
+              /{batch.batchTotal}:{' '}
+            </Box>
+            {highlightMatcherLogRest(batch.tail, logTokensColor, logCostColor)}
+          </>
+        )
+      }
+      return highlightMatcherLogRest(rest, logTokensColor, logCostColor)
+    },
+    [logTokensColor, logCostColor, theme.palette.mode],
+  )
+
   const showTable = contacts.length > 0 && headers.length > 0 && companyColumnKey != null
   const logEndRef = useRef<HTMLDivElement>(null)
   const [elapsedSec, setElapsedSec] = useState(0)
@@ -415,7 +467,7 @@ export function MatcherReviewPanel({
                     <Box component="span" sx={{ color: logTimestampColor, fontWeight: 700 }}>
                       {parts.stamp}
                     </Box>{' '}
-                    {highlightMatcherLogRest(parts.rest, logTokensColor, logCostColor)}
+                    {renderMatcherLogRest(parts.rest)}
                   </>
                 ) : (
                   line
