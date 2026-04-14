@@ -48,6 +48,17 @@ describe('CrmExportFeature', () => {
     expect(screen.getByText('Export to CRM')).toBeInTheDocument()
   })
 
+  it('compact mode shows short CRM label with tooltip', async () => {
+    vi.mocked(fetchCrmEnabled).mockResolvedValueOnce(true)
+
+    render(<CrmExportFeature contacts={mockContacts} headers={mockHeaders} compact />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('crm-export-trigger')).toBeInTheDocument()
+    })
+    expect(screen.getByText('CRM')).toBeInTheDocument()
+  })
+
   it('renders nothing while feature detection is loading', () => {
     vi.mocked(fetchCrmEnabled).mockReturnValue(new Promise(() => {}))
 

@@ -1,35 +1,53 @@
 /**
  * @file UploadDropZone.stories.tsx
- * @description Storybook stories for UploadDropZone component.
+ * @description Storybook stories for ImportWorkflowDialog.
  * @module List-O-Matic-2000/client
  */
 import type { Meta, StoryObj } from '@storybook/react'
-import { UploadDropZone } from './UploadDropZone'
+import { ImportWorkflowDialog } from './UploadDropZone'
 
-const meta: Meta<typeof UploadDropZone> = {
-  component: UploadDropZone,
+const meta: Meta<typeof ImportWorkflowDialog> = {
+  component: ImportWorkflowDialog,
   tags: ['autodocs'],
   argTypes: {
-    onFileAccepted: { action: 'fileAccepted' },
+    onImportContacts: { action: 'importContacts' },
+    onImportCompanies: { action: 'importCompanies' },
     onClose: { action: 'closed' },
   },
 }
 export default meta
 
-type Story = StoryObj<typeof UploadDropZone>
+type Story = StoryObj<typeof ImportWorkflowDialog>
 
 export const Closed: Story = {
   args: {
     open: false,
     onClose: () => {},
-    onFileAccepted: () => {},
+    entryKind: 'contacts',
+    hasContacts: false,
+    onImportContacts: async (file) => ({ fileName: file.name, rowCount: 0 }),
+    onImportCompanies: async (file) => ({ fileName: file.name, rowCount: 0 }),
   },
 }
 
-export const Open: Story = {
+export const OpenContacts: Story = {
   args: {
     open: true,
     onClose: () => {},
-    onFileAccepted: () => {},
+    entryKind: 'contacts',
+    hasContacts: false,
+    onImportContacts: async (file) => ({ fileName: file.name, rowCount: 12 }),
+    onImportCompanies: async (file) => ({ fileName: file.name, rowCount: 5 }),
+  },
+}
+
+export const OpenCompanies: Story = {
+  args: {
+    open: true,
+    onClose: () => {},
+    entryKind: 'companies',
+    hasContacts: false,
+    onImportContacts: async (file) => ({ fileName: file.name, rowCount: 12 }),
+    onImportCompanies: async (file) => ({ fileName: file.name, rowCount: 5 }),
   },
 }

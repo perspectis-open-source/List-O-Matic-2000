@@ -182,9 +182,11 @@ export async function postMatchCompaniesBatched(
     const chunk = items.slice(i, i + chunkSize)
     const batchIndex = Math.floor(i / chunkSize) + 1
     options?.onHttpRequestStart?.({ batchIndex, batchTotal: total, itemCount: chunk.length })
-    const { results, meta } = await postMatchCompanies(canonicalNames, chunk, {
-      onStreamProgress: options?.onServerStreamProgress,
-    })
+    const { results, meta } = await postMatchCompanies(
+      canonicalNames,
+      chunk,
+      options?.onServerStreamProgress ? { onStreamProgress: options.onServerStreamProgress } : undefined
+    )
     all.push(...results)
     if (addUsage(usageTotals, meta?.usage)) sawAnyUsage = true
     const m = meta?.model?.trim()
@@ -197,8 +199,7 @@ export async function postMatchCompaniesBatched(
       modelThisRequest: m,
       usageThisRequest: meta?.usage,
     })
-    const completed = batchIndex
-    options?.onBatchProgress?.(completed, total)
+    options?.onBatchProgress?.(batchIndex, total)
   }
   return { results: all, usageTotals: sawAnyUsage ? usageTotals : null, matcherModel }
 }

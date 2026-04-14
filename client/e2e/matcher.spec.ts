@@ -5,6 +5,7 @@
 import { test, expect } from '@playwright/test'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { dismissImportWorkflowDialog, chooseWorkspaceMode } from './helpers'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -31,10 +32,14 @@ test.describe('Contact Company Matcher', () => {
     await page.getByTestId('upload-trigger-contacts').click()
     const fileInput = page.getByRole('dialog').locator('input[type="file"]')
     await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-contacts.csv'))
+    await dismissImportWorkflowDialog(page)
+    await chooseWorkspaceMode(page, 'matcher')
     await expect(page.getByTestId('main-content')).toContainText('3 rows')
 
-    await page.getByTestId('import-companies-toolbar').click()
+    await page.getByTestId('header-upload-menu-button').click()
+    await page.getByTestId('header-upload-companies').click()
     await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-companies.csv'))
+    await dismissImportWorkflowDialog(page)
 
     await page.getByTestId('tab-results-matcher').click()
 

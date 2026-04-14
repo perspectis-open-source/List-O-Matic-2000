@@ -85,9 +85,11 @@ export function getAppTheme(mode: PaletteMode) {
       MuiAppBar: {
         styleOverrides: {
           root: {
-            backgroundColor: SLATE_900,
-            borderBottom: `1px solid ${SLATE_700}`,
-            color: SLATE_50,
+            // App chrome header: always light for logo + title contrast (body still follows palette mode).
+            backgroundColor: '#ffffff',
+            backgroundImage: 'none',
+            borderBottom: '1px solid #e2e8f0',
+            color: SLATE_900,
           },
         },
       },

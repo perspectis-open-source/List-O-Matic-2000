@@ -358,7 +358,7 @@ export function pickMatchedCompanyHeader(existingHeaders: string[]): string {
 }
 
 /** CSV column for the match dropdown; must match `AgMatcherContactsGrid` headerName. */
-export const MATCHER_TABLE_EXPORT_MATCH_HEADER = 'Match to company list'
+export const MATCHER_TABLE_EXPORT_MATCH_HEADER = 'Company'
 
 /**
  * Build rows and header list for exporting the matcher preview table (same column order as the grid).

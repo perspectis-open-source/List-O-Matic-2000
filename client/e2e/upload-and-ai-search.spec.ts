@@ -6,6 +6,7 @@
 import { test, expect } from '@playwright/test'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { dismissImportWorkflowDialog, chooseWorkspaceMode } from './helpers'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -28,6 +29,8 @@ test.describe('Upload and Contact Company Normalizer flow', () => {
     await expect(fileInput).toBeVisible()
     const fixturePath = path.join(__dirname, 'fixtures', 'sample-contacts.csv')
     await fileInput.setInputFiles(fixturePath)
+    await dismissImportWorkflowDialog(page)
+    await chooseWorkspaceMode(page, 'normalizer')
 
     await expect(page.getByTestId('main-content')).toContainText('sample-contacts.csv')
     await expect(page.getByTestId('main-content')).toContainText('3 rows')
@@ -60,6 +63,8 @@ test.describe('Upload and Contact Company Normalizer flow', () => {
     await page.getByTestId('upload-trigger-contacts').click()
     const fileInput = page.getByRole('dialog').locator('input[type="file"]')
     await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-contacts.csv'))
+    await dismissImportWorkflowDialog(page)
+    await chooseWorkspaceMode(page, 'normalizer')
     await expect(page.getByTestId('main-content')).toContainText('3 rows')
     await expect(page.getByTestId('tab-contacts')).toBeVisible()
     await expect(page.getByTestId('export-import-list-button')).toBeVisible()
@@ -73,6 +78,8 @@ test.describe('Upload and Contact Company Normalizer flow', () => {
     await page.getByTestId('upload-trigger-contacts').click()
     const fileInput = page.getByRole('dialog').locator('input[type="file"]')
     await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-contacts.csv'))
+    await dismissImportWorkflowDialog(page)
+    await chooseWorkspaceMode(page, 'normalizer')
     await expect(page.getByTestId('main-content')).toContainText('3 rows')
 
     await page.getByTestId('company-select-input').click()
@@ -91,7 +98,7 @@ test.describe('Upload and Contact Company Normalizer flow', () => {
     })
     await expect(page.getByText(/2 contacts matching your search/)).toBeVisible({ timeout: 5000 })
     await expect(page.getByTestId('remove-from-import-button')).toBeVisible()
-    await expect(page.getByTestId('remove-from-import-button')).toContainText('Remove records from Import List')
+    await expect(page.getByTestId('remove-from-import-button')).toHaveText('Remove')
 
     await page.getByTestId('remove-from-import-button').click()
 
@@ -103,11 +110,13 @@ test.describe('Upload and Contact Company Normalizer flow', () => {
     await expect(page.getByTestId('export-results-button')).toBeVisible()
   })
 
-  test('LLM search dialog shows warning during search', async ({ page }) => {
+  test('Normalizer activity panel shows warning during search', async ({ page }) => {
     await page.goto('/')
     await page.getByTestId('upload-trigger-contacts').click()
     const fileInput = page.getByRole('dialog').locator('input[type="file"]')
     await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-contacts.csv'))
+    await dismissImportWorkflowDialog(page)
+    await chooseWorkspaceMode(page, 'normalizer')
     await page.getByTestId('company-select-input').click()
     await page.getByRole('option', { name: 'Acme Inc' }).click()
 
@@ -125,10 +134,10 @@ test.describe('Upload and Contact Company Normalizer flow', () => {
     })
 
     await page.getByTestId('contact-company-normalizer-button').click()
-    const dialog = page.getByTestId('llm-search-dialog')
-    await expect(dialog).toBeVisible({ timeout: 3000 })
-    await expect(dialog.getByText(/LLM results may be incorrect or inaccurate/)).toBeVisible()
-    await expect(dialog.getByText(/Please check results\./)).toBeVisible()
+    const panel = page.getByTestId('normalizer-run-log')
+    await expect(panel).toBeVisible({ timeout: 3000 })
+    await expect(panel.getByText(/LLM results may be incorrect or inaccurate/)).toBeVisible()
+    await expect(panel.getByText(/Please check results\./)).toBeVisible()
     resolveFulfill!()
     await expect(page.getByTestId('tab-results-normalizer')).toHaveAttribute('aria-selected', 'true', {
       timeout: 10000,
@@ -140,10 +149,13 @@ test.describe('Upload and Contact Company Normalizer flow', () => {
     await page.getByTestId('upload-trigger-companies').click()
     const fileInput = page.getByRole('dialog').locator('input[type="file"]')
     await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-companies.csv'))
+    await dismissImportWorkflowDialog(page)
     await expect(page.getByTestId('main-content')).toContainText('sample-companies.csv')
     await expect(page.getByTestId('companies-table')).toBeVisible()
     await page.getByTestId('upload-contacts-from-companies-only').click()
     await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-contacts.csv'))
+    await dismissImportWorkflowDialog(page)
+    await chooseWorkspaceMode(page, 'normalizer')
     await expect(page.getByTestId('main-content')).toContainText('3 rows')
     await expect(page.getByTestId('tab-companies')).toBeVisible()
     await page.getByTestId('tab-companies').click()

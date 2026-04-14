@@ -7,6 +7,7 @@
 import { test, expect } from '@playwright/test'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { dismissImportWorkflowDialog, chooseWorkspaceMode } from './helpers'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -53,6 +54,8 @@ async function uploadAndSearch(page: import('@playwright/test').Page, crmEnabled
   await page.getByTestId('upload-trigger-contacts').click()
   const fileInput = page.getByRole('dialog').locator('input[type="file"]')
   await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-contacts.csv'))
+  await dismissImportWorkflowDialog(page)
+  await chooseWorkspaceMode(page, 'normalizer')
   await expect(page.getByTestId('main-content')).toContainText('3 rows')
 
   await page.getByTestId('company-select-input').click()

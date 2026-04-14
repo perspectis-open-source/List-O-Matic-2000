@@ -18,6 +18,7 @@ const DEFAULT_FIELD = 130
 const DEFAULT_IMPORT = 200
 const DEFAULT_MATCH = 260
 const SKIP_VALUE = ''
+const PLACEHOLDER_LABEL = 'Select Company…'
 
 export type MatcherMatchGridContext = {
   companyColumnKey: string
@@ -45,9 +46,13 @@ function MatcherMatchCellRenderer(
   if (!ctx?.companyColumnKey || !data) return null
 
   const raw = String(data[ctx.companyColumnKey] ?? '').trim()
-  const value = ctx.selection[raw] ?? SKIP_VALUE
+  const stored = ctx.selection[raw]
+  const value = stored === undefined ? SKIP_VALUE : stored
   const provenance = ctx.provenanceByRaw[raw]
   const showFallbackOutline = provenance === 'deterministic'
+  const isExplicitSkip = stored === SKIP_VALUE && provenance === 'manual'
+  const needsPlaceholder =
+    stored === undefined || (stored === SKIP_VALUE && provenance !== 'manual')
 
   return (
     <TextField
@@ -57,11 +62,30 @@ function MatcherMatchCellRenderer(
       value={value}
       data-provenance={provenance ?? ''}
       data-testid="matcher-match-select"
+      data-match-display={needsPlaceholder ? 'placeholder' : isExplicitSkip ? 'skip' : 'company'}
       onChange={(e) => {
         ctx.onSelectionChange(raw, e.target.value)
         ctx.requestMatchColumnRefresh()
       }}
       SelectProps={{
+        displayEmpty: true,
+        renderValue: (selected) => {
+          if (needsPlaceholder) {
+            return (
+              <Typography component="span" variant="body2" color="text.secondary">
+                {PLACEHOLDER_LABEL}
+              </Typography>
+            )
+          }
+          if (selected === SKIP_VALUE && isExplicitSkip) {
+            return (
+              <Typography component="span" variant="body2">
+                <em>— Skip —</em>
+              </Typography>
+            )
+          }
+          return selected as string
+        },
         MenuProps: {
           disablePortal: false,
           slotProps: {
@@ -99,6 +123,7 @@ type Props = {
   contacts: ContactRow[]
   headers: string[]
   companyColumnKey: string | null
+  /** Canonical company names from the companies import (`Name` column); dropdown options only. */
   canonicalNames: string[]
   selection: Record<string, string>
   selectionProvenance: Record<string, MatcherSelectionProvenance>
@@ -173,7 +198,7 @@ export function AgMatcherContactsGrid({
         })
         defs.push({
           colId: 'match_company',
-          headerName: 'Match to company list',
+          headerName: 'Company',
           sortable: false,
           filter: false,
           floatingFilter: false,

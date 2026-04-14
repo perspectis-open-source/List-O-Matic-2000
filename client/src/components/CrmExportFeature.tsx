@@ -6,7 +6,7 @@
  * @module List-O-Matic-2000/client
  */
 import { useState, useEffect } from 'react'
-import { Button } from '@mui/material'
+import { Button, Tooltip } from '@mui/material'
 import type { ContactRow } from '../utils/parseFile'
 import { fetchCrmEnabled } from '../api/crmExport'
 import { CrmExportDialog } from './CrmExportDialog'
@@ -14,9 +14,20 @@ import { CrmExportDialog } from './CrmExportDialog'
 interface CrmExportFeatureProps {
   contacts: ContactRow[]
   headers: string[]
+  /** Smaller trigger button for dense toolbars (e.g. normalizer results row). */
+  compact?: boolean
 }
 
-export function CrmExportFeature({ contacts, headers }: CrmExportFeatureProps) {
+const compactButtonSx = {
+  py: 0.25,
+  px: 0.75,
+  minHeight: 28,
+  fontSize: '0.7rem',
+  lineHeight: 1.2,
+  textTransform: 'none' as const,
+}
+
+export function CrmExportFeature({ contacts, headers, compact = false }: CrmExportFeatureProps) {
   const [crmEnabled, setCrmEnabled] = useState<boolean | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
 
@@ -32,16 +43,21 @@ export function CrmExportFeature({ contacts, headers }: CrmExportFeatureProps) {
 
   if (crmEnabled !== true) return null
 
+  const triggerButton = (
+    <Button
+      variant="outlined"
+      size="small"
+      onClick={() => setDialogOpen(true)}
+      data-testid="crm-export-trigger"
+      sx={compact ? compactButtonSx : undefined}
+    >
+      {compact ? 'CRM' : 'Export to CRM'}
+    </Button>
+  )
+
   return (
     <>
-      <Button
-        variant="outlined"
-        size="small"
-        onClick={() => setDialogOpen(true)}
-        data-testid="crm-export-trigger"
-      >
-        Export to CRM
-      </Button>
+      {compact ? <Tooltip title="Export to CRM">{triggerButton}</Tooltip> : triggerButton}
       <CrmExportDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}

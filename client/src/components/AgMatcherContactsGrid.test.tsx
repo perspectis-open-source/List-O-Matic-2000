@@ -63,8 +63,75 @@ describe('AgMatcherContactsGrid', () => {
       expect(grid.getAttribute('aria-colcount')).not.toBe('0')
     })
     expect(within(grid).getByRole('columnheader', { name: 'Company (import)' })).toBeInTheDocument()
-    expect(within(grid).getByRole('columnheader', { name: 'Match to company list' })).toBeInTheDocument()
+    expect(within(grid).getByRole('columnheader', { name: 'Company' })).toBeInTheDocument()
     expect(within(grid).getByRole('columnheader', { name: 'First' })).toBeInTheDocument()
+  })
+
+  it('shows Select Company placeholder when no pick and not explicit Skip', async () => {
+    const oneRow = [mockContacts[0]]
+    render(
+      <AgMatcherContactsGrid
+        contacts={oneRow}
+        headers={mockHeaders}
+        companyColumnKey="Company"
+        canonicalNames={['Acme Holdings LLC']}
+        selection={{}}
+        selectionProvenance={{}}
+        onSelectionChange={() => {}}
+        maxHeight={440}
+      />,
+    )
+    const grid = screen.getByRole('grid')
+    await waitFor(() => {
+      expect(grid.getAttribute('aria-colcount')).not.toBe('0')
+    })
+    const el = screen.getByTestId('matcher-match-select')
+    expect(el).toHaveAttribute('data-match-display', 'placeholder')
+    expect(screen.getByText('Select Company…')).toBeInTheDocument()
+  })
+
+  it('shows placeholder when selection is empty string but provenance is not manual', async () => {
+    const oneRow = [mockContacts[0]]
+    render(
+      <AgMatcherContactsGrid
+        contacts={oneRow}
+        headers={mockHeaders}
+        companyColumnKey="Company"
+        canonicalNames={['Acme Holdings LLC']}
+        selection={{ 'Acme Inc': '' }}
+        selectionProvenance={{}}
+        onSelectionChange={() => {}}
+        maxHeight={440}
+      />,
+    )
+    const grid = screen.getByRole('grid')
+    await waitFor(() => {
+      expect(grid.getAttribute('aria-colcount')).not.toBe('0')
+    })
+    expect(screen.getByTestId('matcher-match-select')).toHaveAttribute('data-match-display', 'placeholder')
+  })
+
+  it('shows Skip label when user chose Skip (empty value + manual provenance)', async () => {
+    const oneRow = [mockContacts[0]]
+    render(
+      <AgMatcherContactsGrid
+        contacts={oneRow}
+        headers={mockHeaders}
+        companyColumnKey="Company"
+        canonicalNames={['Acme Holdings LLC']}
+        selection={{ 'Acme Inc': '' }}
+        selectionProvenance={{ 'Acme Inc': 'manual' }}
+        onSelectionChange={() => {}}
+        maxHeight={440}
+      />,
+    )
+    const grid = screen.getByRole('grid')
+    await waitFor(() => {
+      expect(grid.getAttribute('aria-colcount')).not.toBe('0')
+    })
+    const el = screen.getByTestId('matcher-match-select')
+    expect(el).toHaveAttribute('data-match-display', 'skip')
+    expect(screen.getByText(/Skip/)).toBeInTheDocument()
   })
 
   it('marks match selects with data-provenance deterministic for fallback fills', async () => {

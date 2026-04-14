@@ -212,7 +212,9 @@ export function MatcherReviewPanel({
 
   const showTable = contacts.length > 0 && headers.length > 0 && companyColumnKey != null
   const logEndRef = useRef<HTMLDivElement>(null)
+  const runStartedAtRef = useRef<number | null>(null)
   const [elapsedSec, setElapsedSec] = useState(0)
+  const [lastRunTotalSec, setLastRunTotalSec] = useState<number | null>(null)
   const [activityLogVisible, setActivityLogVisible] = useState(true)
   /** Show only contact rows whose import company string has no canonical match selected yet. */
   const [showUnmatchedOnly, setShowUnmatchedOnly] = useState(false)
@@ -260,12 +262,20 @@ export function MatcherReviewPanel({
       setElapsedSec(0)
       return
     }
+    setLastRunTotalSec(null)
     const t0 = Date.now()
+    runStartedAtRef.current = t0
     setElapsedSec(0)
     const id = window.setInterval(() => {
       setElapsedSec(Math.floor((Date.now() - t0) / 1000))
     }, 500)
-    return () => window.clearInterval(id)
+    return () => {
+      window.clearInterval(id)
+      if (runStartedAtRef.current != null) {
+        setLastRunTotalSec(Math.floor((Date.now() - runStartedAtRef.current) / 1000))
+        runStartedAtRef.current = null
+      }
+    }
   }, [running])
 
   const formatElapsed = (s: number) => {
@@ -285,6 +295,8 @@ export function MatcherReviewPanel({
         llmProgress.server.step3?.done ||
         (llmProgress.server.fallback && llmProgress.server.fallback.total > 0))
   )
+
+  const activityPanelMaxHeight = 'min(40vh, 320px)'
 
   return (
     <Box
@@ -330,93 +342,6 @@ export function MatcherReviewPanel({
         </Tooltip>
       </Box>
 
-      {showProgress && (
-        <Box sx={{ flexShrink: 0 }}>
-          <Typography variant="caption" color="text.secondary" data-testid="matcher-llm-progress-label">
-            {running ? `Elapsed ${formatElapsed(elapsedSec)} · ` : ''}
-            {llmProgress != null && llmProgress.total > 0
-              ? `HTTP batches ${llmProgress.completed} / ${llmProgress.total}`
-              : 'Contacting server…'}
-            {httpWaiting ? ' · model running…' : ''}
-          </Typography>
-          {llmProgress != null && llmProgress.total > 0 && (
-            <LinearProgress
-              variant="determinate"
-              value={(100 * llmProgress.completed) / llmProgress.total}
-              sx={{ mt: 0.5, borderRadius: 1 }}
-              data-testid="matcher-llm-progress"
-            />
-          )}
-          {httpWaiting && (
-            <LinearProgress
-              variant="indeterminate"
-              sx={{ mt: 0.75, borderRadius: 1, height: 4, opacity: 0.85 }}
-              data-testid="matcher-llm-progress-pending"
-            />
-          )}
-          {serverStepsVisible && (httpWaiting || running) && (
-            <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 0.75 }} data-testid="matcher-server-steps">
-              {llmProgress.server.step1 && (
-                <Box>
-                  <Typography variant="caption" color="text.secondary" display="block">
-                    {llmProgress.server.step1.cached
-                      ? '① List rows — parent inference (cached)'
-                      : `① List rows — parent inference (${llmProgress.server.step1.completed} / ${llmProgress.server.step1.total} model batches)`}
-                  </Typography>
-                  {!llmProgress.server.step1.cached && llmProgress.server.step1.total > 0 && (
-                    <LinearProgress
-                      variant="determinate"
-                      value={
-                        (100 * llmProgress.server.step1.completed) / Math.max(1, llmProgress.server.step1.total)
-                      }
-                      sx={{ mt: 0.25, borderRadius: 1, height: 4 }}
-                    />
-                  )}
-                </Box>
-              )}
-              {llmProgress.server.step2 && (
-                <Box>
-                  <Typography variant="caption" color="text.secondary" display="block">
-                    ② Contact strings — parent inference ({llmProgress.server.step2.completed} /{' '}
-                    {llmProgress.server.step2.total} model batches)
-                  </Typography>
-                  {llmProgress.server.step2.total > 0 && (
-                    <LinearProgress
-                      variant="determinate"
-                      value={
-                        (100 * llmProgress.server.step2.completed) / Math.max(1, llmProgress.server.step2.total)
-                      }
-                      sx={{ mt: 0.25, borderRadius: 1, height: 4 }}
-                    />
-                  )}
-                </Box>
-              )}
-              {llmProgress.server.step3?.done && (
-                <Typography variant="caption" color="text.secondary" display="block">
-                  ③ Match on parent labels — {llmProgress.server.step3.detail ?? 'done'}
-                </Typography>
-              )}
-              {llmProgress.server.fallback && llmProgress.server.fallback.total > 0 && (
-                <Box>
-                  <Typography variant="caption" color="text.secondary" display="block">
-                    ④ Closed-list fallback ({llmProgress.server.fallback.completed} /{' '}
-                    {llmProgress.server.fallback.total} model batches)
-                  </Typography>
-                  <LinearProgress
-                    variant="determinate"
-                    value={
-                      (100 * llmProgress.server.fallback.completed) /
-                      Math.max(1, llmProgress.server.fallback.total)
-                    }
-                    sx={{ mt: 0.25, borderRadius: 1, height: 4 }}
-                  />
-                </Box>
-              )}
-            </Box>
-          )}
-        </Box>
-      )}
-
       {showActivityPanel && activityLogVisible && (
         <Paper
           variant="outlined"
@@ -424,7 +349,7 @@ export function MatcherReviewPanel({
           sx={{
             flexShrink: 0,
             p: 1,
-            maxHeight: 168,
+            maxHeight: activityPanelMaxHeight,
             overflow: 'auto',
             borderRadius: 1,
             bgcolor: 'action.hover',
@@ -434,10 +359,10 @@ export function MatcherReviewPanel({
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
               Activity
             </Typography>
-            <Tooltip title="Hide activity log">
+            <Tooltip title="Hide activity and progress">
               <IconButton
                 size="small"
-                aria-label="Hide activity log"
+                aria-label="Hide activity and progress"
                 onClick={() => setActivityLogVisible(false)}
                 data-testid="matcher-run-log-hide"
                 sx={{ p: 0.25 }}
@@ -446,6 +371,92 @@ export function MatcherReviewPanel({
               </IconButton>
             </Tooltip>
           </Box>
+          {showProgress && (
+            <Box sx={{ flexShrink: 0, mb: 1 }}>
+              <Typography variant="caption" color="text.secondary" data-testid="matcher-llm-progress-label">
+                {running ? `Elapsed ${formatElapsed(elapsedSec)} · ` : ''}
+                {llmProgress != null && llmProgress.total > 0
+                  ? `HTTP batches ${llmProgress.completed} / ${llmProgress.total}`
+                  : 'Contacting server…'}
+                {httpWaiting ? ' · model running…' : ''}
+              </Typography>
+              {llmProgress != null && llmProgress.total > 0 && (
+                <LinearProgress
+                  variant="determinate"
+                  value={(100 * llmProgress.completed) / llmProgress.total}
+                  sx={{ mt: 0.5, borderRadius: 1 }}
+                  data-testid="matcher-llm-progress"
+                />
+              )}
+              {httpWaiting && (
+                <LinearProgress
+                  variant="indeterminate"
+                  sx={{ mt: 0.75, borderRadius: 1, height: 4, opacity: 0.85 }}
+                  data-testid="matcher-llm-progress-pending"
+                />
+              )}
+              {serverStepsVisible && (httpWaiting || running) && (
+                <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 0.75 }} data-testid="matcher-server-steps">
+                  {llmProgress.server.step1 && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        {llmProgress.server.step1.cached
+                          ? '① List rows — parent inference (cached)'
+                          : `① List rows — parent inference (${llmProgress.server.step1.completed} / ${llmProgress.server.step1.total} model batches)`}
+                      </Typography>
+                      {!llmProgress.server.step1.cached && llmProgress.server.step1.total > 0 && (
+                        <LinearProgress
+                          variant="determinate"
+                          value={
+                            (100 * llmProgress.server.step1.completed) / Math.max(1, llmProgress.server.step1.total)
+                          }
+                          sx={{ mt: 0.25, borderRadius: 1, height: 4 }}
+                        />
+                      )}
+                    </Box>
+                  )}
+                  {llmProgress.server.step2 && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        ② Contact strings — parent inference ({llmProgress.server.step2.completed} /{' '}
+                        {llmProgress.server.step2.total} model batches)
+                      </Typography>
+                      {llmProgress.server.step2.total > 0 && (
+                        <LinearProgress
+                          variant="determinate"
+                          value={
+                            (100 * llmProgress.server.step2.completed) / Math.max(1, llmProgress.server.step2.total)
+                          }
+                          sx={{ mt: 0.25, borderRadius: 1, height: 4 }}
+                        />
+                      )}
+                    </Box>
+                  )}
+                  {llmProgress.server.step3?.done && (
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      ③ Match on parent labels — {llmProgress.server.step3.detail ?? 'done'}
+                    </Typography>
+                  )}
+                  {llmProgress.server.fallback && llmProgress.server.fallback.total > 0 && (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        ④ Closed-list fallback ({llmProgress.server.fallback.completed} /{' '}
+                        {llmProgress.server.fallback.total} model batches)
+                      </Typography>
+                      <LinearProgress
+                        variant="determinate"
+                        value={
+                          (100 * llmProgress.server.fallback.completed) /
+                          Math.max(1, llmProgress.server.fallback.total)
+                        }
+                        sx={{ mt: 0.25, borderRadius: 1, height: 4 }}
+                      />
+                    </Box>
+                  )}
+                </Box>
+              )}
+            </Box>
+          )}
           {runLog.map((line, i) => {
             const parts = splitMatcherLogTimestamp(line)
             return (
@@ -475,6 +486,23 @@ export function MatcherReviewPanel({
               </Typography>
             )
           })}
+          {!running && lastRunTotalSec !== null && runLog.length > 0 && (
+            <Typography
+              component="div"
+              variant="caption"
+              data-testid="matcher-run-log-total-time"
+              sx={{
+                fontFamily: 'monospace',
+                fontSize: '0.7rem',
+                lineHeight: 1.45,
+                mt: 0.5,
+                color: logTimestampColor,
+                fontWeight: 700,
+              }}
+            >
+              Total processing time: {formatElapsed(lastRunTotalSec)}
+            </Typography>
+          )}
           <div ref={logEndRef} />
         </Paper>
       )}
@@ -489,7 +517,7 @@ export function MatcherReviewPanel({
             data-testid="matcher-run-log-show"
             sx={{ alignSelf: 'flex-start', py: 0.25, px: 0.5, fontSize: '0.75rem' }}
           >
-            Show activity log
+            Show activity & progress
           </Button>
         </Box>
       )}
