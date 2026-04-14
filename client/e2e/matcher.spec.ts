@@ -36,8 +36,7 @@ test.describe('Contact Company Matcher', () => {
     await page.getByTestId('import-companies-toolbar').click()
     await fileInput.setInputFiles(path.join(__dirname, 'fixtures', 'sample-companies.csv'))
 
-    await page.getByRole('tab', { name: 'Results' }).click()
-    await page.getByRole('tab', { name: 'Contact Company Matcher' }).click()
+    await page.getByTestId('tab-results-matcher').click()
 
     await page.getByTestId('matcher-run-button').click()
     await expect(page.getByTestId('matcher-apply-button')).toBeEnabled({ timeout: 15000 })

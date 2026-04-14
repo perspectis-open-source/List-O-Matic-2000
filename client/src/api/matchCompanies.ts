@@ -10,7 +10,28 @@ export type MatchCompanyItem = { raw: string; topCandidates: string[] }
 
 export type MatchCompanyResult = { raw: string; match: string | null; alternates?: string[] }
 
-export type MatchCompaniesResponse = { results: MatchCompanyResult[] }
+/** Cumulative token counts from the OpenAI Chat Completions API (one HTTP response may include several model calls). */
+export type MatchCompaniesUsageTotals = {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
+export type MatchCompaniesResponse = {
+  results: MatchCompanyResult[]
+  meta?: { llmSubBatches?: number; usage?: MatchCompaniesUsageTotals; model?: string }
+}
+
+export type MatchCompaniesHttpInfo = {
+  batchIndex: number
+  batchTotal: number
+  itemCount: number
+  serverLlmSubBatches?: number
+  /** OpenAI model id for this HTTP response (if the server reported it). */
+  modelThisRequest?: string
+  /** Token usage for this HTTP response only (if the server reported it). */
+  usageThisRequest?: MatchCompaniesUsageTotals
+}
 
 export async function postMatchCompanies(
   canonicalNames: string[],
@@ -28,17 +49,68 @@ export async function postMatchCompanies(
   return res.json() as Promise<MatchCompaniesResponse>
 }
 
-/** Split items into batches of at most MATCH_API_BATCH_SIZE; run sequentially to avoid huge payloads. */
+export type PostMatchCompaniesBatchedOptions = {
+  /** Chunk size for this run (default {@link MATCH_API_BATCH_SIZE}). */
+  clientBatchSize?: number
+  /** Fires immediately before each POST. */
+  onHttpRequestStart?: (info: Omit<MatchCompaniesHttpInfo, 'serverLlmSubBatches'>) => void
+  /** Fires after each POST returns successfully. */
+  onHttpRequestComplete?: (info: MatchCompaniesHttpInfo) => void
+  /** Fires after each HTTP chunk completes (`completed` 1..`total`). */
+  onBatchProgress?: (completed: number, total: number) => void
+}
+
+export type PostMatchCompaniesBatchedResult = {
+  results: MatchCompanyResult[]
+  /** Sum of `meta.usage` across all HTTP responses; null if nothing was reported. */
+  usageTotals: MatchCompaniesUsageTotals | null
+  /** Last non-empty `meta.model` seen across HTTP responses; null if never sent. */
+  matcherModel: string | null
+}
+
+function addUsage(
+  agg: MatchCompaniesUsageTotals,
+  u: MatchCompaniesUsageTotals | undefined
+): boolean {
+  if (!u) return false
+  agg.promptTokens += u.promptTokens ?? 0
+  agg.completionTokens += u.completionTokens ?? 0
+  agg.totalTokens += u.totalTokens ?? 0
+  return true
+}
+
+/** Split items into batches; run sequentially to avoid huge payloads. */
 export async function postMatchCompaniesBatched(
   canonicalNames: string[],
-  items: MatchCompanyItem[]
-): Promise<MatchCompanyResult[]> {
-  if (items.length === 0) return []
+  items: MatchCompanyItem[],
+  options?: PostMatchCompaniesBatchedOptions
+): Promise<PostMatchCompaniesBatchedResult> {
+  if (items.length === 0) return { results: [], usageTotals: null, matcherModel: null }
+  const chunkSize = options?.clientBatchSize ?? MATCH_API_BATCH_SIZE
+  const total = Math.ceil(items.length / chunkSize)
   const all: MatchCompanyResult[] = []
-  for (let i = 0; i < items.length; i += MATCH_API_BATCH_SIZE) {
-    const chunk = items.slice(i, i + MATCH_API_BATCH_SIZE)
-    const { results } = await postMatchCompanies(canonicalNames, chunk)
+  const usageTotals: MatchCompaniesUsageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+  let sawAnyUsage = false
+  let matcherModel: string | null = null
+  for (let i = 0; i < items.length; i += chunkSize) {
+    const chunk = items.slice(i, i + chunkSize)
+    const batchIndex = Math.floor(i / chunkSize) + 1
+    options?.onHttpRequestStart?.({ batchIndex, batchTotal: total, itemCount: chunk.length })
+    const { results, meta } = await postMatchCompanies(canonicalNames, chunk)
     all.push(...results)
+    if (addUsage(usageTotals, meta?.usage)) sawAnyUsage = true
+    const m = meta?.model?.trim()
+    if (m) matcherModel = m
+    options?.onHttpRequestComplete?.({
+      batchIndex,
+      batchTotal: total,
+      itemCount: chunk.length,
+      serverLlmSubBatches: meta?.llmSubBatches,
+      modelThisRequest: m,
+      usageThisRequest: meta?.usage,
+    })
+    const completed = batchIndex
+    options?.onBatchProgress?.(completed, total)
   }
-  return all
+  return { results: all, usageTotals: sawAnyUsage ? usageTotals : null, matcherModel }
 }

@@ -59,8 +59,9 @@ async function uploadAndSearch(page: import('@playwright/test').Page, crmEnabled
   await page.getByRole('option', { name: 'Acme Inc' }).click()
   await page.getByTestId('contact-company-normalizer-button').click()
 
-  await expect(page.getByRole('tab', { name: 'Results' })).toBeVisible({ timeout: 10000 })
-  await page.getByRole('tab', { name: 'Results' }).click()
+  await expect(page.getByTestId('tab-results-normalizer')).toHaveAttribute('aria-selected', 'true', {
+    timeout: 10000,
+  })
   await expect(page.getByText(/contacts matching your search/)).toBeVisible({ timeout: 10000 })
 }
 

@@ -83,6 +83,58 @@ function blockingKey2(norm: string): string {
   return '__'
 }
 
+/** Tokens that should not drive nickname→brand matching (legal boilerplate / sector words). */
+const GENERIC_COMPANY_TOKENS = new Set([
+  'company',
+  'companies',
+  'inc',
+  'incorporated',
+  'llc',
+  'llp',
+  'ltd',
+  'limited',
+  'corp',
+  'corporation',
+  'plc',
+  'lp',
+  'group',
+  'holdings',
+  'holding',
+  'partners',
+  'enterprises',
+  'enterprise',
+  'international',
+  'intl',
+  'global',
+  'usa',
+  'us',
+  'associates',
+  'association',
+  'services',
+  'service',
+  'solutions',
+  'systems',
+  'capital',
+  'management',
+  'technologies',
+  'technology',
+  'industries',
+  'products',
+])
+
+/** Token-level score for raw vs one word of a canonical name (used for nicknames like "Coke" vs "coca"). */
+function tokenMatchScore(rawNorm: string, rawAlLen: number, tok: string): number {
+  if (tok.length < 3) return 0
+  if (GENERIC_COMPANY_TOKENS.has(tok)) return 0
+  const jw = jaroWinkler(rawNorm, tok)
+  if (rawAlLen >= 3 && tok.length > rawAlLen) {
+    const excess = tok.length - rawAlLen
+    const lenFactor = Math.max(0.55, 1 - 0.11 * excess)
+    return jw * lenFactor
+  }
+  return jw
+}
+
 /** Dedupe canonical company names from import (trim, preserve first-seen casing). */
 export function canonicalNamesFromCompanies(companies: CompanyRow[]): string[] {
   const lowerSeen = new Set<string>()
@@ -133,8 +185,11 @@ function collectCandidates(
   }
   const arr = [...pool]
   if (arr.length > MATCH_MAX_CANDIDATES_FULL_SCAN) {
-    arr.sort((a, b) => a.length - b.length)
-    return arr.slice(0, MATCH_MAX_CANDIDATES_FULL_SCAN)
+    // Keep the strongest matches, not the shortest names: long legal names (e.g. "Coca-Cola Company")
+    // were being dropped while short unrelated names (e.g. "Cortiva") stayed in the pool.
+    const ranked = arr.map((name) => ({ name, score: scorePair(rawNorm, name) }))
+    ranked.sort((a, b) => b.score - a.score)
+    return ranked.slice(0, MATCH_MAX_CANDIDATES_FULL_SCAN).map((x) => x.name)
   }
   return arr
 }
@@ -146,7 +201,25 @@ function scorePair(rawNorm: string, canonical: string): number {
     const base = jaroWinkler(rawNorm, cNorm)
     return Math.min(1, base + 0.08)
   }
-  return jaroWinkler(rawNorm, cNorm)
+  const full = jaroWinkler(rawNorm, cNorm)
+  const rawAl = rawNorm.replace(/[^a-z0-9]/g, '')
+  const rawAlLen = rawAl.length
+  // Compare raw to each distinctive "word" so nicknames like "Coke" score against "coca" / "cola".
+  // Generic words ("Companies", "LLC") and length-penalized longer tokens reduce false positives (e.g. "Cooper").
+  if (rawAlLen < 3) return full
+  const tokens = cNorm.split(/[^a-z0-9]+/).filter(Boolean)
+  let tokenBest = 0
+  let strongDistinctiveTokens = 0
+  for (const tok of tokens) {
+    const tScore = tokenMatchScore(rawNorm, rawAlLen, tok)
+    tokenBest = Math.max(tokenBest, tScore)
+    if (tScore >= 0.58) strongDistinctiveTokens++
+  }
+  let combined = Math.max(full, tokenBest)
+  if (strongDistinctiveTokens >= 2) {
+    combined = Math.min(1, combined + 0.04)
+  }
+  return combined
 }
 
 export function scoreRawAgainstCanonicals(

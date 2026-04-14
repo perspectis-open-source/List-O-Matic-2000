@@ -56,6 +56,19 @@ describe('matchDeterministicBatch', () => {
     const rows = matchDeterministicBatch(['Xyz Unknown'], [])
     expect(rows[0].tier).toBe('needs_llm')
   })
+
+  it('keeps long canonicals when the co blocking bucket exceeds the cap (Coke vs Coca-Cola)', () => {
+    const fillers = Array.from({ length: 450 }, (_, i) => `Co Zzz Filler ${i} LLC`)
+    const canon = ['Cortiva', 'Coca-Cola Company', ...fillers]
+    const rows = matchDeterministicBatch(['Coke'], canon)
+    expect(rows[0].topCandidates.some((c) => c.name === 'Coca-Cola Company')).toBe(true)
+    expect(rows[0].best).toBe('Coca-Cola Company')
+  })
+
+  it('prefers Coca-Cola Company over Cooper Companies for Coke', () => {
+    const rows = matchDeterministicBatch(['Coke'], ['Cooper Companies', 'Coca-Cola Company'])
+    expect(rows[0].best).toBe('Coca-Cola Company')
+  })
 })
 
 describe('pickMatchedCompanyHeader', () => {

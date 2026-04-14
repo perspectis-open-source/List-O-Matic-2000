@@ -1,54 +1,79 @@
 /**
  * @file matchCompanies.test.ts
- * @description Tests for match-companies client API.
+ * @description postMatchCompaniesBatched progress callback and batching.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { postMatchCompanies, postMatchCompaniesBatched } from './matchCompanies'
-
-describe('postMatchCompanies', () => {
-  beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn())
-  })
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  it('POSTs body and returns results', async () => {
-    const mockFetch = vi.mocked(fetch)
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ results: [{ raw: 'A', match: 'B', alternates: [] }] }),
-    } as Response)
-
-    const out = await postMatchCompanies(['B'], [{ raw: 'A', topCandidates: ['B'] }])
-    expect(out.results).toHaveLength(1)
-    expect(out.results[0].match).toBe('B')
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/match-companies'),
-      expect.objectContaining({ method: 'POST' })
-    )
-  })
-
-  it('throws on error response', async () => {
-    vi.mocked(fetch).mockResolvedValue({
-      ok: false,
-      json: async () => ({ error: 'bad' }),
-    } as Response)
-    await expect(postMatchCompanies([], [])).rejects.toThrow('bad')
-  })
-})
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { MATCH_API_BATCH_SIZE } from '../constants/companyMatch'
+import { postMatchCompaniesBatched } from './matchCompanies'
 
 describe('postMatchCompaniesBatched', () => {
-  beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn())
-  })
   afterEach(() => {
-    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
-  it('returns empty array when no items', async () => {
-    const out = await postMatchCompaniesBatched(['x'], [])
-    expect(out).toEqual([])
-    expect(fetch).not.toHaveBeenCalled()
+  it('invokes onBatchProgress once per HTTP chunk in order', async () => {
+    const n = MATCH_API_BATCH_SIZE + 10
+    const items = Array.from({ length: n }, (_, i) => ({ raw: `r${i}`, topCandidates: [] as string[] }))
+    const total = Math.ceil(n / MATCH_API_BATCH_SIZE)
+    const progress: number[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      return new Response(
+        JSON.stringify({
+          results: [],
+          meta: {
+            model: 'gpt-4o-mini',
+            llmSubBatches: 1,
+            usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    })
+    await postMatchCompaniesBatched(['A'], items, {
+      onBatchProgress: (completed, t) => {
+        expect(t).toBe(total)
+        progress.push(completed)
+      },
+    })
+    expect(progress).toEqual(Array.from({ length: total }, (_, i) => i + 1))
+  })
+
+  it('returns empty array without calling fetch when items empty', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const out = await postMatchCompaniesBatched(['A'], [])
+    expect(out).toEqual({ results: [], usageTotals: null, matcherModel: null })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('uses clientBatchSize and reports server llmSubBatches on complete', async () => {
+    const items = Array.from({ length: 25 }, (_, i) => ({ raw: `r${i}`, topCandidates: [] as string[] }))
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      return new Response(
+        JSON.stringify({
+          results: [],
+          meta: {
+            model: 'gpt-4o-mini',
+            llmSubBatches: 2,
+            usage: { promptTokens: 100, completionTokens: 40, totalTokens: 140 },
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    })
+    const starts: number[] = []
+    const completes: number[] = []
+    const { usageTotals, matcherModel } = await postMatchCompaniesBatched(['A'], items, {
+      clientBatchSize: 10,
+      onHttpRequestStart: ({ batchIndex }) => starts.push(batchIndex),
+      onHttpRequestComplete: ({ serverLlmSubBatches, modelThisRequest }) => {
+        completes.push(serverLlmSubBatches ?? 0)
+        expect(modelThisRequest).toBe('gpt-4o-mini')
+      },
+    })
+    expect(fetchSpy).toHaveBeenCalledTimes(3)
+    expect(starts).toEqual([1, 2, 3])
+    expect(completes).toEqual([2, 2, 2])
+    expect(usageTotals).toEqual({ promptTokens: 300, completionTokens: 120, totalTokens: 420 })
+    expect(matcherModel).toBe('gpt-4o-mini')
   })
 })

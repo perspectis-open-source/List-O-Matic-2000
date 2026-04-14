@@ -48,8 +48,9 @@ test.describe('Upload and Contact Company Normalizer flow', () => {
 
     await page.getByTestId('contact-company-normalizer-button').click()
 
-    await expect(page.getByRole('tab', { name: 'Results' })).toBeVisible()
-    await page.getByRole('tab', { name: 'Results' }).click()
+    await expect(page.getByTestId('tab-results-normalizer')).toHaveAttribute('aria-selected', 'true', {
+      timeout: 10000,
+    })
     await expect(page.getByText(/contacts matching your search/)).toBeVisible({ timeout: 10000 })
     await expect(page.getByTestId('export-results-button')).toBeVisible()
   })
@@ -85,8 +86,9 @@ test.describe('Upload and Contact Company Normalizer flow', () => {
     })
     await page.getByTestId('contact-company-normalizer-button').click()
 
-    await expect(page.getByRole('tab', { name: 'Results' })).toBeVisible({ timeout: 10000 })
-    await page.getByRole('tab', { name: 'Results' }).click()
+    await expect(page.getByTestId('tab-results-normalizer')).toHaveAttribute('aria-selected', 'true', {
+      timeout: 10000,
+    })
     await expect(page.getByText(/2 contacts matching your search/)).toBeVisible({ timeout: 5000 })
     await expect(page.getByTestId('remove-from-import-button')).toBeVisible()
     await expect(page.getByTestId('remove-from-import-button')).toContainText('Remove records from Import List')
@@ -96,7 +98,7 @@ test.describe('Upload and Contact Company Normalizer flow', () => {
     await expect(page.getByRole('tab', { name: 'Contacts' })).toBeVisible()
     await expect(page.getByTestId('main-content')).toContainText('1 row')
 
-    await page.getByRole('tab', { name: 'Results' }).click()
+    await page.getByTestId('tab-results-normalizer').click()
     await expect(page.getByText(/2 contacts matching your search/)).toBeVisible()
     await expect(page.getByTestId('export-results-button')).toBeVisible()
   })
@@ -128,7 +130,9 @@ test.describe('Upload and Contact Company Normalizer flow', () => {
     await expect(dialog.getByText(/LLM results may be incorrect or inaccurate/)).toBeVisible()
     await expect(dialog.getByText(/Please check results\./)).toBeVisible()
     resolveFulfill!()
-    await expect(page.getByRole('tab', { name: 'Results' })).toBeVisible({ timeout: 10000 })
+    await expect(page.getByTestId('tab-results-normalizer')).toHaveAttribute('aria-selected', 'true', {
+      timeout: 10000,
+    })
   })
 
   test('companies-first: import companies then contacts reaches main workspace', async ({ page }) => {

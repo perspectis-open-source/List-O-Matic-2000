@@ -21,7 +21,14 @@ export const MATCH_BLOCKING_EXPAND_THRESHOLD = 12
 /** Top candidates to send to the LLM per unresolved raw string. */
 export const MATCH_LLM_TOP_K = 8
 
-/** Max items per POST /api/match-companies request. */
+/** Max items per POST /api/match-companies request (generic callers). */
 export const MATCH_API_BATCH_SIZE = 80
+
+/**
+ * Matcher uses a smaller chunk so the progress bar advances more often (more HTTP round trips).
+ * Server still runs the model in sub-batches of 50 per request.
+ * 30 items per batch yields more HTTP round-trips than 40 (finer progress), fewer than smaller chunks.
+ */
+export const MATCH_MATCHER_CLIENT_BATCH_SIZE = 30
 
 export const MATCHED_COMPANY_HEADER = 'Matched Company'

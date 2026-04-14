@@ -3,13 +3,14 @@
  * @description AG Grid matcher preview: contact columns plus import company + MUI match dropdown; filterable and resizable.
  * @module List-O-Matic-2000/client
  */
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import type { ColDef, GridApi, GridReadyEvent, ICellRendererParams } from 'ag-grid-community'
 import SearchIcon from '@mui/icons-material/Search'
 import { Box, InputAdornment, Paper, TextField, Typography, MenuItem } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
 import type { ContactRow } from '../utils/parseFile'
+import type { MatcherSelectionProvenance } from './MatcherReviewPanel'
 
 const ROW_HEIGHT = 52
 const MIN_COL_PX = 72
@@ -21,6 +22,7 @@ const SKIP_VALUE = ''
 export type MatcherMatchGridContext = {
   companyColumnKey: string
   selection: Record<string, string>
+  provenanceByRaw: Record<string, MatcherSelectionProvenance>
   onSelectionChange: (raw: string, value: string) => void
   canonicalNamesSorted: string[]
   /** Re-paint match cells after a selection change (other rows may share the same raw company). */
@@ -44,6 +46,8 @@ function MatcherMatchCellRenderer(
 
   const raw = String(data[ctx.companyColumnKey] ?? '').trim()
   const value = ctx.selection[raw] ?? SKIP_VALUE
+  const provenance = ctx.provenanceByRaw[raw]
+  const showFallbackOutline = provenance === 'deterministic'
 
   return (
     <TextField
@@ -51,6 +55,8 @@ function MatcherMatchCellRenderer(
       size="small"
       fullWidth
       value={value}
+      data-provenance={provenance ?? ''}
+      data-testid="matcher-match-select"
       onChange={(e) => {
         ctx.onSelectionChange(raw, e.target.value)
         ctx.requestMatchColumnRefresh()
@@ -65,7 +71,17 @@ function MatcherMatchCellRenderer(
           },
         },
       }}
-      sx={{ '& .MuiSelect-select': { py: 0.75, overflow: 'hidden', textOverflow: 'ellipsis' } }}
+      sx={{
+        ...(showFallbackOutline
+          ? {
+              outline: '2px solid',
+              outlineColor: 'error.main',
+              outlineOffset: 2,
+              borderRadius: 1,
+            }
+          : {}),
+        '& .MuiSelect-select': { py: 0.75, overflow: 'hidden', textOverflow: 'ellipsis' },
+      }}
     >
       <MenuItem value={SKIP_VALUE}>
         <em>— Skip —</em>
@@ -85,8 +101,10 @@ type Props = {
   companyColumnKey: string | null
   canonicalNames: string[]
   selection: Record<string, string>
+  selectionProvenance: Record<string, MatcherSelectionProvenance>
   onSelectionChange: (raw: string, value: string) => void
   maxHeight?: number
+  fillContainer?: boolean
 }
 
 export function AgMatcherContactsGrid({
@@ -95,8 +113,10 @@ export function AgMatcherContactsGrid({
   companyColumnKey,
   canonicalNames,
   selection,
+  selectionProvenance,
   onSelectionChange,
   maxHeight = 520,
+  fillContainer = false,
 }: Props) {
   const theme = useTheme()
   const [quickFilterText, setQuickFilterText] = useState('')
@@ -121,12 +141,17 @@ export function AgMatcherContactsGrid({
     () => ({
       companyColumnKey: companyColumnKey ?? '',
       selection,
+      provenanceByRaw: selectionProvenance,
       onSelectionChange,
       canonicalNamesSorted: sortedCanon,
       requestMatchColumnRefresh,
     }),
-    [companyColumnKey, selection, onSelectionChange, sortedCanon, requestMatchColumnRefresh],
+    [companyColumnKey, selection, selectionProvenance, onSelectionChange, sortedCanon, requestMatchColumnRefresh],
   )
+
+  useEffect(() => {
+    gridApiRef.current?.refreshCells({ columns: ['match_company'], force: true })
+  }, [selection, selectionProvenance])
 
   const columnDefs = useMemo<ColDef<ContactRow>[]>(() => {
     if (!companyColumnKey) return []
@@ -203,8 +228,25 @@ export function AgMatcherContactsGrid({
   }
 
   return (
-    <Paper variant="outlined" sx={{ overflow: 'hidden', borderRadius: 2 }} data-testid="matcher-preview-table">
-      <Box sx={{ px: 1.5, py: 1, borderBottom: 1, borderColor: 'divider' }}>
+    <Paper
+      variant="outlined"
+      sx={{
+        overflow: 'hidden',
+        borderRadius: 2,
+        ...(fillContainer
+          ? {
+              flex: 1,
+              minHeight: 0,
+              alignSelf: 'stretch',
+              width: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+            }
+          : {}),
+      }}
+      data-testid="matcher-preview-table"
+    >
+      <Box sx={{ flexShrink: 0, px: 1.5, py: 1, borderBottom: 1, borderColor: 'divider' }}>
         <TextField
           size="small"
           fullWidth
@@ -223,7 +265,15 @@ export function AgMatcherContactsGrid({
           }}
         />
       </Box>
-      <div className="ag-theme-alpine" style={{ height: gridHeight, width: '100%' }} data-testid="matcher-grid">
+      <div
+        className="ag-theme-alpine"
+        style={
+          fillContainer
+            ? { flex: 1, minHeight: 160, width: '100%' }
+            : { height: gridHeight, width: '100%' }
+        }
+        data-testid="matcher-grid"
+      >
         <AgGridReact<ContactRow>
           rowData={contacts}
           columnDefs={columnDefs}

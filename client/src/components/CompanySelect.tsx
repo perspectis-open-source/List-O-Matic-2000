@@ -70,7 +70,7 @@ export function CompanySelect({
         />
       )}
       disabled={disabled}
-      sx={{ minWidth: 280 }}
+      sx={{ minWidth: 200, maxWidth: 280, flex: '1 1 200px' }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' && value && onSelectForChat) {
           onSelectForChat(value)

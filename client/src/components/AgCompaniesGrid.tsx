@@ -28,9 +28,11 @@ type Props = {
   companies: CompanyRow[]
   headers: string[]
   maxHeight?: number
+  /** When true, parent should be a flex item with a bounded height; grid fills remaining space. */
+  fillContainer?: boolean
 }
 
-export function AgCompaniesGrid({ companies, headers, maxHeight = 500 }: Props) {
+export function AgCompaniesGrid({ companies, headers, maxHeight = 500, fillContainer = false }: Props) {
   const [quickFilterText, setQuickFilterText] = useState('')
 
   const columnDefs = useMemo<ColDef<CompanyRow>[]>(
@@ -88,8 +90,25 @@ export function AgCompaniesGrid({ companies, headers, maxHeight = 500 }: Props) 
   }
 
   return (
-    <Paper variant="outlined" sx={{ overflow: 'hidden', borderRadius: 2 }} data-testid="companies-table">
-      <Box sx={{ px: 1.5, py: 1, borderBottom: 1, borderColor: 'divider' }}>
+    <Paper
+      variant="outlined"
+      sx={{
+        overflow: 'hidden',
+        borderRadius: 2,
+        ...(fillContainer
+          ? {
+              flex: 1,
+              minHeight: 0,
+              alignSelf: 'stretch',
+              width: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+            }
+          : {}),
+      }}
+      data-testid="companies-table"
+    >
+      <Box sx={{ flexShrink: 0, px: 1.5, py: 1, borderBottom: 1, borderColor: 'divider' }}>
         <TextField
           size="small"
           fullWidth
@@ -108,7 +127,15 @@ export function AgCompaniesGrid({ companies, headers, maxHeight = 500 }: Props) 
           }}
         />
       </Box>
-      <div className="ag-theme-alpine" style={{ height: gridHeight, width: '100%' }} data-testid="companies-grid">
+      <div
+        className="ag-theme-alpine"
+        style={
+          fillContainer
+            ? { flex: 1, minHeight: 160, width: '100%' }
+            : { height: gridHeight, width: '100%' }
+        }
+        data-testid="companies-grid"
+      >
         <AgGridReact<CompanyRow>
           rowData={companies}
           columnDefs={columnDefs}

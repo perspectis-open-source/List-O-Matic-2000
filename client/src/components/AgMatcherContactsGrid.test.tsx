@@ -38,6 +38,7 @@ describe('AgMatcherContactsGrid', () => {
         companyColumnKey={null}
         canonicalNames={['Acme Holdings LLC']}
         selection={{}}
+        selectionProvenance={{}}
         onSelectionChange={() => {}}
       />,
     )
@@ -52,6 +53,7 @@ describe('AgMatcherContactsGrid', () => {
         companyColumnKey="Company"
         canonicalNames={['Acme Holdings LLC', 'Globex Partners Inc']}
         selection={{}}
+        selectionProvenance={{}}
         onSelectionChange={() => {}}
         maxHeight={440}
       />,
@@ -63,5 +65,27 @@ describe('AgMatcherContactsGrid', () => {
     expect(within(grid).getByRole('columnheader', { name: 'Company (import)' })).toBeInTheDocument()
     expect(within(grid).getByRole('columnheader', { name: 'Match to company list' })).toBeInTheDocument()
     expect(within(grid).getByRole('columnheader', { name: 'First' })).toBeInTheDocument()
+  })
+
+  it('marks match selects with data-provenance deterministic for fallback fills', async () => {
+    const oneRow = [mockContacts[0]]
+    render(
+      <AgMatcherContactsGrid
+        contacts={oneRow}
+        headers={mockHeaders}
+        companyColumnKey="Company"
+        canonicalNames={['Acme Holdings LLC']}
+        selection={{ 'Acme Inc': 'Acme Holdings LLC' }}
+        selectionProvenance={{ 'Acme Inc': 'deterministic' }}
+        onSelectionChange={() => {}}
+        maxHeight={440}
+      />,
+    )
+    const grid = screen.getByRole('grid')
+    await waitFor(() => {
+      expect(grid.getAttribute('aria-colcount')).not.toBe('0')
+    })
+    const el = screen.getByTestId('matcher-match-select')
+    expect(el).toHaveAttribute('data-provenance', 'deterministic')
   })
 })
