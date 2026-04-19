@@ -4,7 +4,7 @@
  * @module List-O-Matic-2000/client
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { render } from '../test/utils'
 import { AgMatcherContactsGrid } from './AgMatcherContactsGrid'
 import { mockContacts, mockHeaders } from '../test/fixtures'
@@ -62,8 +62,8 @@ describe('AgMatcherContactsGrid', () => {
     await waitFor(() => {
       expect(grid.getAttribute('aria-colcount')).not.toBe('0')
     })
-    expect(within(grid).getByRole('columnheader', { name: 'Company (import)' })).toBeInTheDocument()
-    expect(within(grid).getByRole('columnheader', { name: 'Company' })).toBeInTheDocument()
+    expect(within(grid).getByRole('columnheader', { name: 'Company (Import)' })).toBeInTheDocument()
+    expect(within(grid).getByRole('columnheader', { name: 'Company (CRM)' })).toBeInTheDocument()
     expect(within(grid).getByRole('columnheader', { name: 'First' })).toBeInTheDocument()
   })
 
@@ -134,7 +134,7 @@ describe('AgMatcherContactsGrid', () => {
     expect(screen.getByText(/Skip/)).toBeInTheDocument()
   })
 
-  it('marks match selects with data-provenance deterministic for fallback fills', async () => {
+  it('marks match selects with data-provenance llm when set', async () => {
     const oneRow = [mockContacts[0]]
     render(
       <AgMatcherContactsGrid
@@ -143,7 +143,7 @@ describe('AgMatcherContactsGrid', () => {
         companyColumnKey="Company"
         canonicalNames={['Acme Holdings LLC']}
         selection={{ 'Acme Inc': 'Acme Holdings LLC' }}
-        selectionProvenance={{ 'Acme Inc': 'deterministic' }}
+        selectionProvenance={{ 'Acme Inc': 'llm' }}
         onSelectionChange={() => {}}
         maxHeight={440}
       />,
@@ -153,6 +153,43 @@ describe('AgMatcherContactsGrid', () => {
       expect(grid.getAttribute('aria-colcount')).not.toBe('0')
     })
     const el = screen.getByTestId('matcher-match-select')
-    expect(el).toHaveAttribute('data-provenance', 'deterministic')
+    expect(el).toHaveAttribute('data-provenance', 'llm')
+  })
+
+  it('shows tooltip on hover with parent vs CRM narrative', async () => {
+    const oneRow = [mockContacts[0]]
+    render(
+      <AgMatcherContactsGrid
+        contacts={oneRow}
+        headers={mockHeaders}
+        companyColumnKey="Company"
+        canonicalNames={['Acme Holdings LLC']}
+        selection={{ 'Acme Inc': 'Acme Holdings LLC' }}
+        selectionProvenance={{ 'Acme Inc': 'llm' }}
+        matchExplainByRaw={{
+          'Acme Inc': {
+            source: 'llm',
+            suggested: 'Acme Holdings LLC',
+            optionHints: ['Acme Holdings LLC', 'Other Co'],
+            contactCount: 2,
+          },
+        }}
+        matcherParentByRaw={{ 'Acme Inc': 'Acme Holdings LLC' }}
+        matcherParentByCanon={{ 'Acme Holdings LLC': 'Acme Holdings LLC' }}
+        onSelectionChange={() => {}}
+        maxHeight={440}
+      />,
+    )
+    const grid = screen.getByRole('grid')
+    await waitFor(() => {
+      expect(grid.getAttribute('aria-colcount')).not.toBe('0')
+    })
+    fireEvent.mouseOver(screen.getByTestId('matcher-match-select'))
+    await waitFor(() => {
+      expect(screen.getByRole('tooltip')).toHaveTextContent(/Contact company of Acme Inc mapped to Parent/)
+    })
+    expect(screen.getByRole('tooltip')).toHaveTextContent(
+      /CRM company is Acme Holdings LLC, so it matched\./,
+    )
   })
 })

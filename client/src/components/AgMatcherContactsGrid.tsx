@@ -7,9 +7,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import type { ColDef, GridApi, GridReadyEvent, ICellRendererParams } from 'ag-grid-community'
 import SearchIcon from '@mui/icons-material/Search'
-import { Box, InputAdornment, Paper, TextField, Typography, MenuItem } from '@mui/material'
+import { Box, InputAdornment, Paper, TextField, Typography, MenuItem, Tooltip } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
 import type { ContactRow } from '../utils/parseFile'
+import { buildMatcherMatchTooltipText } from '../utils/matcherMatchTooltip'
 import type { MatcherSelectionProvenance } from './MatcherReviewPanel'
 
 const ROW_HEIGHT = 52
@@ -20,10 +21,23 @@ const DEFAULT_MATCH = 260
 const SKIP_VALUE = ''
 const PLACEHOLDER_LABEL = 'Select Company…'
 
+/** Facts from the last matcher run, used for match-column hover tooltips. */
+export type MatcherMatchExplain = {
+  source: 'ambiguous' | 'llm'
+  suggested: string | null
+  optionHints: string[]
+  contactCount: number
+}
+
 export type MatcherMatchGridContext = {
   companyColumnKey: string
   selection: Record<string, string>
   provenanceByRaw: Record<string, MatcherSelectionProvenance>
+  matchExplainByRaw?: Record<string, MatcherMatchExplain>
+  /** Inferred parent label for each unique contact import string (matcher / keybook). */
+  parentByRaw: Record<string, string>
+  /** Inferred parent for each companies-file `Name` (canonical CRM row). */
+  parentByCanon: Record<string, string>
   onSelectionChange: (raw: string, value: string) => void
   canonicalNamesSorted: string[]
   /** Re-paint match cells after a selection change (other rows may share the same raw company). */
@@ -49,73 +63,76 @@ function MatcherMatchCellRenderer(
   const stored = ctx.selection[raw]
   const value = stored === undefined ? SKIP_VALUE : stored
   const provenance = ctx.provenanceByRaw[raw]
-  const showFallbackOutline = provenance === 'deterministic'
   const isExplicitSkip = stored === SKIP_VALUE && provenance === 'manual'
   const needsPlaceholder =
     stored === undefined || (stored === SKIP_VALUE && provenance !== 'manual')
 
+  const title = buildMatcherMatchTooltipText(raw, {
+    selection: ctx.selection,
+    provenanceByRaw: ctx.provenanceByRaw,
+    matchExplainByRaw: ctx.matchExplainByRaw,
+    parentByRaw: ctx.parentByRaw,
+    parentByCanon: ctx.parentByCanon,
+  })
+
   return (
-    <TextField
-      select
-      size="small"
-      fullWidth
-      value={value}
-      data-provenance={provenance ?? ''}
-      data-testid="matcher-match-select"
-      data-match-display={needsPlaceholder ? 'placeholder' : isExplicitSkip ? 'skip' : 'company'}
-      onChange={(e) => {
-        ctx.onSelectionChange(raw, e.target.value)
-        ctx.requestMatchColumnRefresh()
-      }}
-      SelectProps={{
-        displayEmpty: true,
-        renderValue: (selected) => {
-          if (needsPlaceholder) {
-            return (
-              <Typography component="span" variant="body2" color="text.secondary">
-                {PLACEHOLDER_LABEL}
-              </Typography>
-            )
-          }
-          if (selected === SKIP_VALUE && isExplicitSkip) {
-            return (
-              <Typography component="span" variant="body2">
-                <em>— Skip —</em>
-              </Typography>
-            )
-          }
-          return selected as string
-        },
-        MenuProps: {
-          disablePortal: false,
-          slotProps: {
-            paper: {
-              sx: { maxHeight: 320, zIndex: 1700 },
+    <Tooltip title={title} describeChild enterDelay={0}>
+      <span style={{ display: 'block', width: '100%' }}>
+        <TextField
+          select
+          size="small"
+          fullWidth
+          value={value}
+          data-provenance={provenance ?? ''}
+          data-testid="matcher-match-select"
+          data-match-display={needsPlaceholder ? 'placeholder' : isExplicitSkip ? 'skip' : 'company'}
+          onChange={(e) => {
+            ctx.onSelectionChange(raw, e.target.value)
+            ctx.requestMatchColumnRefresh()
+          }}
+          SelectProps={{
+            displayEmpty: true,
+            renderValue: (selected) => {
+              if (needsPlaceholder) {
+                return (
+                  <Typography component="span" variant="body2" color="text.secondary">
+                    {PLACEHOLDER_LABEL}
+                  </Typography>
+                )
+              }
+              if (selected === SKIP_VALUE && isExplicitSkip) {
+                return (
+                  <Typography component="span" variant="body2">
+                    <em>— Skip —</em>
+                  </Typography>
+                )
+              }
+              return selected as string
             },
-          },
-        },
-      }}
-      sx={{
-        ...(showFallbackOutline
-          ? {
-              outline: '2px solid',
-              outlineColor: 'error.main',
-              outlineOffset: 2,
-              borderRadius: 1,
-            }
-          : {}),
-        '& .MuiSelect-select': { py: 0.75, overflow: 'hidden', textOverflow: 'ellipsis' },
-      }}
-    >
-      <MenuItem value={SKIP_VALUE}>
-        <em>— Skip —</em>
-      </MenuItem>
-      {ctx.canonicalNamesSorted.map((name) => (
-        <MenuItem key={name} value={name}>
-          {name}
-        </MenuItem>
-      ))}
-    </TextField>
+            MenuProps: {
+              disablePortal: false,
+              slotProps: {
+                paper: {
+                  sx: { maxHeight: 320, zIndex: 1700 },
+                },
+              },
+            },
+          }}
+          sx={{
+            '& .MuiSelect-select': { py: 0.75, overflow: 'hidden', textOverflow: 'ellipsis' },
+          }}
+        >
+          <MenuItem value={SKIP_VALUE}>
+            <em>— Skip —</em>
+          </MenuItem>
+          {ctx.canonicalNamesSorted.map((name) => (
+            <MenuItem key={name} value={name}>
+              {name}
+            </MenuItem>
+          ))}
+        </TextField>
+      </span>
+    </Tooltip>
   )
 }
 
@@ -127,6 +144,10 @@ type Props = {
   canonicalNames: string[]
   selection: Record<string, string>
   selectionProvenance: Record<string, MatcherSelectionProvenance>
+  /** Per unique import string: how the matcher classified it (for match-column tooltips). */
+  matchExplainByRaw?: Record<string, MatcherMatchExplain>
+  matcherParentByRaw?: Record<string, string>
+  matcherParentByCanon?: Record<string, string>
   onSelectionChange: (raw: string, value: string) => void
   maxHeight?: number
   fillContainer?: boolean
@@ -139,6 +160,9 @@ export function AgMatcherContactsGrid({
   canonicalNames,
   selection,
   selectionProvenance,
+  matchExplainByRaw,
+  matcherParentByRaw,
+  matcherParentByCanon,
   onSelectionChange,
   maxHeight = 520,
   fillContainer = false,
@@ -167,16 +191,29 @@ export function AgMatcherContactsGrid({
       companyColumnKey: companyColumnKey ?? '',
       selection,
       provenanceByRaw: selectionProvenance,
+      matchExplainByRaw,
+      parentByRaw: matcherParentByRaw ?? {},
+      parentByCanon: matcherParentByCanon ?? {},
       onSelectionChange,
       canonicalNamesSorted: sortedCanon,
       requestMatchColumnRefresh,
     }),
-    [companyColumnKey, selection, selectionProvenance, onSelectionChange, sortedCanon, requestMatchColumnRefresh],
+    [
+      companyColumnKey,
+      selection,
+      selectionProvenance,
+      matchExplainByRaw,
+      matcherParentByRaw,
+      matcherParentByCanon,
+      onSelectionChange,
+      sortedCanon,
+      requestMatchColumnRefresh,
+    ],
   )
 
   useEffect(() => {
     gridApiRef.current?.refreshCells({ columns: ['match_company'], force: true })
-  }, [selection, selectionProvenance])
+  }, [selection, selectionProvenance, matcherParentByRaw, matcherParentByCanon])
 
   const columnDefs = useMemo<ColDef<ContactRow>[]>(() => {
     if (!companyColumnKey) return []
@@ -187,7 +224,7 @@ export function AgMatcherContactsGrid({
       if (h === companyColumnKey) {
         defs.push({
           colId: `matcher_import_${h}`,
-          headerName: `${h} (import)`,
+          headerName: `${h} (Import)`,
           valueGetter: (p) => String(p.data?.[h] ?? ''),
           sortable: true,
           resizable: true,
@@ -198,7 +235,7 @@ export function AgMatcherContactsGrid({
         })
         defs.push({
           colId: 'match_company',
-          headerName: 'Company',
+          headerName: `${h} (CRM)`,
           sortable: false,
           filter: false,
           floatingFilter: false,

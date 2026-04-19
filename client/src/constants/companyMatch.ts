@@ -31,4 +31,10 @@ export const MATCH_API_BATCH_SIZE = 80
  */
 export const MATCH_MATCHER_CLIENT_BATCH_SIZE = 30
 
+/**
+ * Max parallel POST /api/match-companies calls from the matcher (30 strings each).
+ * Higher throughput increases OpenAI rate-limit risk; use 1 to serialize (enables NDJSON step progress).
+ */
+export const MATCH_MATCHER_CONCURRENT_HTTP = 5
+
 export const MATCHED_COMPANY_HEADER = 'Matched Company'

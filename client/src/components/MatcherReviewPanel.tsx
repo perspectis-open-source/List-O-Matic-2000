@@ -20,7 +20,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import FilterListIcon from '@mui/icons-material/FilterList'
 import DownloadIcon from '@mui/icons-material/Download'
-import { AgMatcherContactsGrid } from './AgMatcherContactsGrid'
+import { AgMatcherContactsGrid, type MatcherMatchExplain } from './AgMatcherContactsGrid'
 import type { ContactRow } from '../utils/parseFile'
 import { buildMatcherTableExport } from '../utils/companyMatch'
 import { downloadCsv } from '../utils/exportCsv'
@@ -28,7 +28,7 @@ import { batchProgressBlue, parseBatchLinePrefix } from '../utils/matcherLogHigh
 
 export type MatcherRowModel = {
   raw: string
-  source: 'auto' | 'ambiguous' | 'llm' | 'deterministic_fallback'
+  source: 'ambiguous' | 'llm'
   contactCount: number
   suggested: string | null
   optionHints: string[]
@@ -48,7 +48,7 @@ export type MatcherLlmProgress = {
   }
 }
 
-export type MatcherSelectionProvenance = 'llm' | 'deterministic' | 'manual'
+export type MatcherSelectionProvenance = 'llm' | 'manual'
 
 function splitMatcherLogTimestamp(line: string): { stamp: string; rest: string } | null {
   const m = line.match(/^(\[[^\]]+\])\s+(.*)$/)
@@ -150,6 +150,10 @@ type MatcherReviewPanelProps = {
   httpWaiting: boolean
   /** Timestamped lines from the current / last matcher run. */
   runLog: string[]
+  /** Inferred parent per unique contact import string (after matcher / keybook). */
+  matcherParentByRaw?: Record<string, string>
+  /** Inferred parent per companies-file canonical `Name`. */
+  matcherParentByCanon?: Record<string, string>
   onSelectionChange: (raw: string, value: string) => void
   onRun: () => void
 }
@@ -169,6 +173,8 @@ export function MatcherReviewPanel({
   llmProgress,
   httpWaiting,
   runLog,
+  matcherParentByRaw,
+  matcherParentByCanon,
   onSelectionChange,
   onRun,
 }: MatcherReviewPanelProps) {
@@ -213,8 +219,8 @@ export function MatcherReviewPanel({
   const [elapsedSec, setElapsedSec] = useState(0)
   const [lastRunTotalSec, setLastRunTotalSec] = useState<number | null>(null)
   const [activityLogVisible, setActivityLogVisible] = useState(true)
-  /** Show only contact rows whose import company string has no canonical match selected yet. */
-  const [showUnmatchedOnly, setShowUnmatchedOnly] = useState(false)
+  /** Grid row filter: all contacts, only those still needing a list match, or only those with a valid list match. */
+  const [gridFilter, setGridFilter] = useState<'all' | 'matched' | 'unmatched'>('all')
 
   const unmatchedUniqueCount = useMemo(() => {
     if (!companyColumnKey) return 0
@@ -226,13 +232,77 @@ export function MatcherReviewPanel({
     return s.size
   }, [contacts, companyColumnKey, selection])
 
+  const canonSet = useMemo(() => new Set(canonicalNames), [canonicalNames])
+
+  /** Per unique import string (matcher row), plus contact-row coverage. */
+  const matchStats = useMemo(() => {
+    let uniqueMatched = 0
+    let byLlm = 0
+    let byManual = 0
+    let byOther = 0
+    for (const row of rows) {
+      const sel = selection[row.raw]?.trim() ?? ''
+      if (!sel || !canonSet.has(sel)) continue
+      uniqueMatched++
+      const p = selectionProvenance[row.raw]
+      if (p === 'llm') byLlm++
+      else if (p === 'manual') byManual++
+      else byOther++
+    }
+    const uniqueTotal = rows.length
+    const uniqueUnmatched = uniqueTotal - uniqueMatched
+
+    let contactRowsMatched = 0
+    if (companyColumnKey) {
+      for (const c of contacts) {
+        const raw = String(c[companyColumnKey] ?? '').trim()
+        if (!raw) continue
+        const sel = selection[raw]?.trim() ?? ''
+        if (sel && canonSet.has(sel)) contactRowsMatched++
+      }
+    }
+    return {
+      uniqueTotal,
+      uniqueMatched,
+      uniqueUnmatched,
+      byLlm,
+      byManual,
+      byOther,
+      contactRowsMatched,
+      contactRowsTotal: contacts.length,
+    }
+  }, [rows, selection, selectionProvenance, canonSet, contacts, companyColumnKey])
+
+  const matchExplainByRaw = useMemo(() => {
+    const m: Record<string, MatcherMatchExplain> = {}
+    for (const row of rows) {
+      m[row.raw] = {
+        source: row.source,
+        suggested: row.suggested,
+        optionHints: row.optionHints,
+        contactCount: row.contactCount,
+      }
+    }
+    return m
+  }, [rows])
+
   const contactsForGrid = useMemo(() => {
-    if (!showUnmatchedOnly || !companyColumnKey) return contacts
-    return contacts.filter((row) => {
-      const raw = String(row[companyColumnKey] ?? '').trim()
-      return raw !== '' && !(selection[raw]?.trim())
-    })
-  }, [contacts, companyColumnKey, selection, showUnmatchedOnly])
+    if (!companyColumnKey) return contacts
+    if (gridFilter === 'unmatched') {
+      return contacts.filter((row) => {
+        const raw = String(row[companyColumnKey] ?? '').trim()
+        return raw !== '' && !(selection[raw]?.trim())
+      })
+    }
+    if (gridFilter === 'matched') {
+      return contacts.filter((row) => {
+        const raw = String(row[companyColumnKey] ?? '').trim()
+        const sel = selection[raw]?.trim() ?? ''
+        return raw !== '' && sel !== '' && canonSet.has(sel)
+      })
+    }
+    return contacts
+  }, [contacts, companyColumnKey, selection, gridFilter, canonSet])
 
   const handleExportTable = useCallback(() => {
     if (!companyColumnKey || contactsForGrid.length === 0) return
@@ -251,7 +321,7 @@ export function MatcherReviewPanel({
   }, [runLog])
 
   useEffect(() => {
-    if (running) setShowUnmatchedOnly(false)
+    if (running) setGridFilter('all')
   }, [running])
 
   useEffect(() => {
@@ -383,7 +453,10 @@ export function MatcherReviewPanel({
                   data-testid="matcher-llm-progress-pending"
                 />
               )}
-              {serverStepsVisible && (httpWaiting || running) && (
+              {serverStepsVisible &&
+                (httpWaiting || running) &&
+                llmProgress != null &&
+                llmProgress.server != null && (
                 <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 0.75 }} data-testid="matcher-server-steps">
                   {llmProgress.server.step1 && (
                     <Box>
@@ -535,46 +608,96 @@ export function MatcherReviewPanel({
               flexShrink: 0,
             }}
           >
-            <Typography variant="subtitle2" color="primary" sx={{ minWidth: 0 }}>
-              {showUnmatchedOnly
-                ? `${contactsForGrid.length.toLocaleString()} of ${contacts.length.toLocaleString()} contact row${
-                    contacts.length !== 1 ? 's' : ''
-                  } (need match)`
-                : `${contacts.length.toLocaleString()} contact${contacts.length !== 1 ? 's' : ''}`}{' '}
-              — drag column edges to resize
-            </Typography>
+            <Box sx={{ minWidth: 0, flex: '1 1 200px' }}>
+              <Typography variant="subtitle2" color="primary" sx={{ minWidth: 0 }}>
+                {gridFilter === 'unmatched'
+                  ? `${contactsForGrid.length.toLocaleString()} of ${contacts.length.toLocaleString()} contact row${
+                      contacts.length !== 1 ? 's' : ''
+                    } (need match)`
+                  : gridFilter === 'matched'
+                    ? `${contactsForGrid.length.toLocaleString()} of ${contacts.length.toLocaleString()} contact row${
+                        contacts.length !== 1 ? 's' : ''
+                      } (matched only)`
+                    : `${contacts.length.toLocaleString()} contact${contacts.length !== 1 ? 's' : ''}`}{' '}
+                — drag column edges to resize
+              </Typography>
+              {rows.length > 0 && (
+                <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.25 }}>
+                  Unique import strings: {matchStats.uniqueMatched.toLocaleString()} of{' '}
+                  {matchStats.uniqueTotal.toLocaleString()} matched (
+                  {matchStats.byLlm.toLocaleString()} model, {matchStats.byManual.toLocaleString()} manual
+                  {matchStats.byOther > 0 ? `, ${matchStats.byOther.toLocaleString()} other` : ''};{' '}
+                  {matchStats.uniqueUnmatched.toLocaleString()} open).
+                  Contact rows with a list match: {matchStats.contactRowsMatched.toLocaleString()} of{' '}
+                  {matchStats.contactRowsTotal.toLocaleString()}.
+                </Typography>
+              )}
+            </Box>
             {rows.length > 0 && (
-              <Tooltip
-                title={
-                  showUnmatchedOnly
-                    ? 'Show every contact row again.'
-                    : unmatchedUniqueCount > 0
-                      ? `Limit the grid to rows whose import company (${unmatchedUniqueCount} unique) has no match in the dropdown yet.`
-                      : 'Every import company already has a match selected.'
-                }
-              >
-                <span>
-                  <Button
-                    size="small"
-                    variant={showUnmatchedOnly ? 'contained' : 'outlined'}
-                    color={showUnmatchedOnly ? 'secondary' : 'primary'}
-                    startIcon={<FilterListIcon sx={{ fontSize: 18 }} />}
-                    onClick={() => setShowUnmatchedOnly((v) => !v)}
-                    disabled={!showUnmatchedOnly && unmatchedUniqueCount === 0}
-                    data-testid="matcher-filter-unmatched-only"
-                    sx={{ flexShrink: 0, fontSize: '0.75rem', whiteSpace: 'nowrap' }}
-                  >
-                    {showUnmatchedOnly
-                      ? 'Show all rows'
-                      : `Need match only (${unmatchedUniqueCount})`}
-                  </Button>
-                </span>
-              </Tooltip>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, alignItems: 'center', flexShrink: 0 }}>
+                <Tooltip
+                  title={
+                    gridFilter === 'matched'
+                      ? 'Show every contact row again.'
+                      : matchStats.contactRowsMatched > 0
+                        ? `Show only rows whose company has a valid list Name selected (${matchStats.contactRowsMatched.toLocaleString()} row${matchStats.contactRowsMatched !== 1 ? 's' : ''}).`
+                        : 'No rows have a valid list match in the dropdown yet.'
+                  }
+                >
+                  <span>
+                    <Button
+                      size="small"
+                      variant={gridFilter === 'matched' ? 'contained' : 'outlined'}
+                      color={gridFilter === 'matched' ? 'secondary' : 'primary'}
+                      startIcon={<FilterListIcon sx={{ fontSize: 18 }} />}
+                      onClick={() => setGridFilter((f) => (f === 'matched' ? 'all' : 'matched'))}
+                      disabled={gridFilter !== 'matched' && matchStats.contactRowsMatched === 0}
+                      data-testid="matcher-filter-matched-only"
+                      sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+                    >
+                      {gridFilter === 'matched'
+                        ? 'Show all rows'
+                        : `Matched only (${matchStats.contactRowsMatched.toLocaleString()})`}
+                    </Button>
+                  </span>
+                </Tooltip>
+                <Tooltip
+                  title={
+                    gridFilter === 'unmatched'
+                      ? 'Show every contact row again.'
+                      : unmatchedUniqueCount > 0
+                        ? `Limit the grid to rows whose import company (${unmatchedUniqueCount} unique) has no match in the dropdown yet.`
+                        : 'Every import company already has a match selected.'
+                  }
+                >
+                  <span>
+                    <Button
+                      size="small"
+                      variant={gridFilter === 'unmatched' ? 'contained' : 'outlined'}
+                      color={gridFilter === 'unmatched' ? 'secondary' : 'primary'}
+                      startIcon={<FilterListIcon sx={{ fontSize: 18 }} />}
+                      onClick={() => setGridFilter((f) => (f === 'unmatched' ? 'all' : 'unmatched'))}
+                      disabled={gridFilter !== 'unmatched' && unmatchedUniqueCount === 0}
+                      data-testid="matcher-filter-unmatched-only"
+                      sx={{ fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+                    >
+                      {gridFilter === 'unmatched'
+                        ? 'Show all rows'
+                        : `Need match only (${unmatchedUniqueCount})`}
+                    </Button>
+                  </span>
+                </Tooltip>
+              </Box>
             )}
           </Box>
-          {showUnmatchedOnly && contactsForGrid.length === 0 && (
+          {gridFilter === 'unmatched' && contactsForGrid.length === 0 && (
             <Typography variant="body2" color="success.main" sx={{ flexShrink: 0 }}>
               Every import company has a match selected — nothing left to filter.
+            </Typography>
+          )}
+          {gridFilter === 'matched' && contactsForGrid.length === 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>
+              No contact rows have a valid companies-list match selected yet.
             </Typography>
           )}
           <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -585,6 +708,9 @@ export function MatcherReviewPanel({
               canonicalNames={canonicalNames}
               selection={selection}
               selectionProvenance={selectionProvenance}
+              matchExplainByRaw={matchExplainByRaw}
+              matcherParentByRaw={matcherParentByRaw}
+              matcherParentByCanon={matcherParentByCanon}
               onSelectionChange={onSelectionChange}
               fillContainer
             />

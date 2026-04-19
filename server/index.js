@@ -12,8 +12,9 @@
  *
  * Contact Company Matcher (/api/match-companies): batched three-step pipeline — (1) infer parent per
  * canonical list row (in-memory LRU by list fingerprint), (2) infer parent per contact raw, (3) deterministic
- * match on aligned parents; optional LLM fallback for rows with no parent match. Optional disk snapshot
- * (MATCH_SNAPSHOT_DIR): one JSON file per companies list; cached contact rows skip LLM, new rows merge in after each run.
+ * match on aligned parents; optional LLM fallback for rows with no parent match.
+ * JSONL keybook: company-key + contact-company-key seed parent maps (LLM only for gaps). contact-company-match
+ * parents backfill contact-company-key on read so step 2 can skip when match rows already store parentCompany.
  * Normalizer still uses gatherMatchesForCompanyQuery (agent + list batches).
  *
  * Request: { messages, uniqueCompanyNames }. Response: { matchingCompanyNames, explanation? }.
@@ -28,6 +29,17 @@ import express from 'express'
 import cors from 'cors'
 import OpenAI from 'openai'
 import { crmRouter } from './crmConnector.js'
+import {
+  readCompanyKeybook,
+  readContactKeybook,
+  readContactMatchbook,
+  persistNewCanonParents,
+  persistNewContactParents,
+  persistContactMatches,
+  getMatcherKeybookSnapshot,
+  seedParentByRawFromKeybooks,
+  shouldRunMatchFallbackForRaw,
+} from './matcherKeybook.js'
 
 const app = express()
 const PORT = process.env.PORT ?? 3001
@@ -479,22 +491,8 @@ const MATCH_LLM_CONCURRENCY = Math.min(
 /** Chat model for /api/match-companies (client uses this for cost estimates). */
 const MATCH_COMPANIES_MODEL = 'gpt-4o-mini'
 
-/** Bump when snapshot schema or matcher semantics change so old files are ignored. */
-const MATCH_SNAPSHOT_VERSION = 2
-
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-
-function matchSnapshotDisabled() {
-  const v = process.env.MATCH_SNAPSHOT_DISABLE?.trim().toLowerCase()
-  return v === '1' || v === 'true' || v === 'yes'
-}
-
-function getMatchSnapshotDir() {
-  const d = process.env.MATCH_SNAPSHOT_DIR?.trim()
-  if (d) return path.resolve(d)
-  return path.join(__dirname, 'data', 'matcher-snapshots')
-}
 
 /** LRU cache: fingerprint of canonical list → Map(canonical Name → inferred parent string). */
 const PARENT_BY_CANON_CACHE_MAX = 16
@@ -505,33 +503,6 @@ function canonicalNamesFingerprint(canonicalNames) {
   return crypto.createHash('sha256').update(sorted.join('\0'), 'utf8').digest('hex')
 }
 
-/** Fingerprint one matcher item (raw + topCandidates) so hint changes invalidate cache. */
-function matcherItemFingerprint(it) {
-  const norm = {
-    raw: it.raw,
-    topCandidates: [...new Set(it.topCandidates ?? [])].sort((a, b) => a.localeCompare(b)),
-  }
-  return crypto.createHash('sha256').update(JSON.stringify(norm), 'utf8').digest('hex')
-}
-
-function parentByCanonObjectToMap(obj) {
-  const m = new Map()
-  if (!obj || typeof obj !== 'object') return m
-  for (const k of Object.keys(obj)) {
-    const v = obj[k]
-    m.set(k, typeof v === 'string' ? v : '')
-  }
-  return m
-}
-
-function parentByCanonMapComplete(parentByCanon, canonicalNames) {
-  if (!parentByCanon || parentByCanon.size === 0) return false
-  for (const name of canonicalNames) {
-    if (!parentByCanon.has(name)) return false
-  }
-  return true
-}
-
 function parentByCanonMapToSortedObject(parentByCanon, canonicalNamesSorted) {
   const o = {}
   for (const name of canonicalNamesSorted) {
@@ -540,12 +511,32 @@ function parentByCanonMapToSortedObject(parentByCanon, canonicalNamesSorted) {
   return o
 }
 
-function sortResultsByRawKeys(resultsByRaw) {
-  const out = {}
-  for (const k of Object.keys(resultsByRaw).sort((a, b) => a.localeCompare(b))) {
-    out[k] = resultsByRaw[k]
+/** Serialize parentByRaw Map for JSON: one entry per request item raw. */
+function parentByRawObjectForItems(parentByRaw, items) {
+  const o = {}
+  if (!parentByRaw || typeof parentByRaw.get !== 'function') return o
+  for (const it of items) {
+    const raw = typeof it.raw === 'string' ? it.raw : ''
+    if (!raw) continue
+    o[raw] = parentByRaw.get(raw) ?? ''
   }
-  return out
+  return o
+}
+
+/** Merge run-time parentByRaw with contact keybook for every request item. */
+function parentByRawObjectForItemsWithKeybook(parentByRaw, requestItems, keybookContactMap) {
+  const o = {}
+  const kb = keybookContactMap instanceof Map ? keybookContactMap : new Map()
+  for (const it of requestItems) {
+    const raw = typeof it.raw === 'string' ? it.raw : ''
+    if (!raw) continue
+    const fromRun = parentByRaw?.get?.(raw)
+    const fromBook = kb.get(raw)
+    const runStr = fromRun !== undefined && fromRun !== null ? String(fromRun).trim() : ''
+    const bookStr = fromBook !== undefined && fromBook !== null ? String(fromBook).trim() : ''
+    o[raw] = runStr || bookStr || ''
+  }
+  return o
 }
 
 function parentCacheGet(fingerprint) {
@@ -724,8 +715,10 @@ ${itemsDesc}`
 }
 
 /**
- * Step 1 (cached / disk seed / LRU) + step 2 + step 3 + fallback for the given `items` slice.
- * @param {Map<string, string> | null} diskParentSeed Complete parentByCanon from list snapshot, or null
+ * Step 1 (LRU + keybook) + step 2 + step 3 + fallback for the given `items` slice.
+ * @param {Map<string, string> | null} keybookParentByCanon name → parent from JSONL keybook
+ * @param {Map<string, string> | null} keybookParentByRaw raw → parent from JSONL keybook
+ * @param {Map<string, { match: string | null, parentCompany: string }> | null} keybookMatchByRaw persisted raw → match + parent (replay before fallback)
  * @param {(ev: { type: 'progress', phase: string, completed?: number, total?: number, cached?: boolean, detail?: string }) => void} [progressSink]
  */
 async function runThreeStepMatchCompaniesWithSeed(
@@ -735,24 +728,69 @@ async function runThreeStepMatchCompaniesWithSeed(
   canonSet,
   lowerToCanon,
   progressSink,
-  diskParentSeed,
+  keybookParentByCanon,
+  keybookParentByRaw,
+  keybookMatchByRaw,
 ) {
   const usageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
   let llmSubBatches = 0
 
   const fp = canonicalNamesFingerprint(canonicalNames)
+  const keyCanon = keybookParentByCanon instanceof Map ? keybookParentByCanon : new Map()
+  const keyRaw = keybookParentByRaw instanceof Map ? keybookParentByRaw : new Map()
+  const keyMatch = keybookMatchByRaw instanceof Map ? keybookMatchByRaw : new Map()
 
   function emitProgress(ev) {
     progressSink?.({ type: 'progress', ...ev })
   }
 
-  async function runStep1Batches() {
+  /** @type {Map<string, string>} */
+  let parentByCanon = new Map()
+  const cached = parentCacheGet(fp)
+  if (cached) {
+    for (const n of canonicalNames) parentByCanon.set(n, String(cached.get(n) ?? '').trim())
+  } else {
+    for (const n of canonicalNames) parentByCanon.set(n, '')
+  }
+
+  for (const n of canonicalNames) {
+    const kb = keyCanon.get(n)
+    if (kb != null && String(kb).trim() !== '') parentByCanon.set(n, String(kb).trim())
+  }
+
+  for (const n of canonicalNames) {
+    if (!parentByCanon.has(n)) parentByCanon.set(n, '')
+  }
+
+  const canonNeedLlm = canonicalNames.filter((n) => !String(parentByCanon.get(n) ?? '').trim())
+  const canonMissAtStart = new Set(canonNeedLlm)
+
+  const seededParents = seedParentByRawFromKeybooks(items, keyRaw, keyMatch)
+  /** @type {Map<string, string>} */
+  let parentByRaw = seededParents.parentByRaw
+  if (seededParents.backfillContactKey.length > 0) {
+    try {
+      await persistNewContactParents(seededParents.backfillContactKey)
+    } catch (err) {
+      console.warn(
+        '[matcher] persist contact-company-key backfill from contact-company-match failed:',
+        err?.message || err,
+      )
+    }
+  }
+
+  const rawNeedLlm = items.filter((it) => !String(parentByRaw.get(it.raw) ?? '').trim())
+  const rawMissAtStart = new Set(rawNeedLlm.map((it) => it.raw))
+
+  async function runStep1Batches(namesToInfer) {
     const local = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
     let batches = 0
-    const map = new Map()
-    const chunks = batched(canonicalNames, MATCH_LLM_BATCH)
+    if (namesToInfer.length === 0) {
+      emitProgress({ phase: 'step1', completed: 1, total: 1, cached: true, detail: 'keybook-jsonl' })
+      return { local, batches }
+    }
+    const chunks = batched(namesToInfer, MATCH_LLM_BATCH)
     const totalChunks = chunks.length
-    if (totalChunks === 0) return { map, local, batches }
     emitProgress({ phase: 'step1', completed: 0, total: totalChunks, cached: false })
     const parts = await parallelMapLimit(
       chunks,
@@ -765,18 +803,20 @@ async function runThreeStepMatchCompaniesWithSeed(
     for (const { parentByCanon: chunk, usage } of parts) {
       accumulateMatcherUsage(local, usage)
       batches += 1
-      for (const [k, v] of chunk) map.set(k, v)
+      for (const [k, v] of chunk) parentByCanon.set(k, v)
     }
-    return { map, local, batches }
+    return { local, batches }
   }
 
-  async function runStep2Batches() {
+  async function runStep2Batches(itemsToInfer) {
     const local = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
     let batches = 0
-    const map = new Map()
-    const chunks = batched(items, MATCH_LLM_BATCH)
+    if (itemsToInfer.length === 0) {
+      emitProgress({ phase: 'step2', completed: 1, total: 1, cached: true, detail: 'keybook-jsonl' })
+      return { local, batches }
+    }
+    const chunks = batched(itemsToInfer, MATCH_LLM_BATCH)
     const totalChunks = chunks.length
-    if (totalChunks === 0) return { map, local, batches }
     emitProgress({ phase: 'step2', completed: 0, total: totalChunks })
     const parts = await parallelMapLimit(
       chunks,
@@ -789,45 +829,15 @@ async function runThreeStepMatchCompaniesWithSeed(
     for (const { parentByRaw: chunk, usage } of parts) {
       accumulateMatcherUsage(local, usage)
       batches += 1
-      for (const [k, v] of chunk) map.set(k, v)
+      for (const [k, v] of chunk) parentByRaw.set(k, v)
     }
-    return { map, local, batches }
+    return { local, batches }
   }
 
-  let parentByCanon
-  let parentByRaw
-
-  if (diskParentSeed && parentByCanonMapComplete(diskParentSeed, canonicalNames)) {
-    parentByCanon = new Map(diskParentSeed)
-    emitProgress({
-      phase: 'step1',
-      completed: 1,
-      total: 1,
-      cached: true,
-      detail: 'disk-snapshot',
-    })
-    const s2 = await runStep2Batches()
-    parentByRaw = s2.map
-    mergeMatcherUsageTotals(usageTotals, s2.local)
-    llmSubBatches += s2.batches
-  } else {
-    parentByCanon = parentCacheGet(fp)
-    if (parentByCanon) {
-      emitProgress({ phase: 'step1', completed: 1, total: 1, cached: true })
-      const s2 = await runStep2Batches()
-      parentByRaw = s2.map
-      mergeMatcherUsageTotals(usageTotals, s2.local)
-      llmSubBatches += s2.batches
-    } else {
-      const [s1, s2] = await Promise.all([runStep1Batches(), runStep2Batches()])
-      parentByCanon = s1.map
-      parentByRaw = s2.map
-      parentCacheSet(fp, parentByCanon)
-      mergeMatcherUsageTotals(usageTotals, s1.local)
-      mergeMatcherUsageTotals(usageTotals, s2.local)
-      llmSubBatches += s1.batches + s2.batches
-    }
-  }
+  const [s1, s2] = await Promise.all([runStep1Batches(canonNeedLlm), runStep2Batches(rawNeedLlm)])
+  mergeMatcherUsageTotals(usageTotals, s1.local)
+  mergeMatcherUsageTotals(usageTotals, s2.local)
+  llmSubBatches += s1.batches + s2.batches
 
   parentCacheSet(fp, parentByCanon)
 
@@ -850,7 +860,16 @@ async function runThreeStepMatchCompaniesWithSeed(
     byRaw.set(it.raw, inferred)
   }
 
-  const needFallback = items.filter((it) => !byRaw.get(it.raw)?.match)
+  for (const it of items) {
+    const cur = byRaw.get(it.raw)
+    if (cur?.match) continue
+    const st = keyMatch.get(it.raw)
+    const m = st?.match != null && typeof st.match === 'string' ? st.match.trim() : ''
+    if (!m || !canonSet.has(m)) continue
+    byRaw.set(it.raw, { raw: it.raw, match: m, alternates: [] })
+  }
+
+  const needFallback = items.filter((it) => shouldRunMatchFallbackForRaw(it.raw, byRaw, parentByRaw, keyMatch))
   const fallbackChunks = batched(needFallback, MATCH_LLM_BATCH).filter((b) => b.length > 0)
   if (fallbackChunks.length > 0) {
     emitProgress({ phase: 'fallback', completed: 0, total: fallbackChunks.length })
@@ -870,7 +889,27 @@ async function runThreeStepMatchCompaniesWithSeed(
   }
 
   const results = items.map((it) => byRaw.get(it.raw) ?? { raw: it.raw, match: null, alternates: [] })
-  return { results, usageTotals, llmSubBatches, parentByCanon }
+
+  const keybookNewCanon = []
+  for (const name of canonMissAtStart) {
+    const p = String(parentByCanon.get(name) ?? '').trim()
+    if (p) keybookNewCanon.push({ name, parentCompany: p })
+  }
+  const keybookNewContact = []
+  for (const raw of rawMissAtStart) {
+    const p = String(parentByRaw.get(raw) ?? '').trim()
+    if (p) keybookNewContact.push({ raw, parentCompany: p })
+  }
+
+  return {
+    results,
+    usageTotals,
+    llmSubBatches,
+    parentByCanon,
+    parentByRaw,
+    keybookNewCanon,
+    keybookNewContact,
+  }
 }
 
 async function runThreeStepMatchCompanies(openai, canonicalNames, items, canonSet, lowerToCanon, progressSink) {
@@ -881,7 +920,9 @@ async function runThreeStepMatchCompanies(openai, canonicalNames, items, canonSe
     canonSet,
     lowerToCanon,
     progressSink,
-    null,
+    new Map(),
+    new Map(),
+    new Map(),
   )
 }
 
@@ -992,129 +1033,18 @@ function matchCompaniesMeta(llmSubBatches, usageTotals) {
   }
 }
 
-function metaForSnapshotResponse(storedMeta) {
-  const m = storedMeta && typeof storedMeta === 'object' ? storedMeta : {}
-  const model = typeof m.model === 'string' && m.model.trim() ? m.model.trim() : MATCH_COMPANIES_MODEL
-  return {
-    model,
-    llmSubBatches: 0,
-    usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-    fromSnapshot: true,
-  }
+function assembleMatcherChunkResults(items, chunkByRaw) {
+  return items.map((it) => chunkByRaw.get(it.raw) ?? { raw: it.raw, match: null, alternates: [] })
 }
 
-/**
- * @returns {Promise<object | null>} Parsed list snapshot or null
- */
-async function tryLoadListMatcherSnapshot(filePath, listFp, canonicalNames) {
-  let raw
+app.get('/api/matcher-keybook', async (_req, res, next) => {
   try {
-    raw = await fs.readFile(filePath, 'utf8')
-  } catch {
-    return null
+    const snapshot = await getMatcherKeybookSnapshot()
+    res.status(200).json(snapshot)
+  } catch (err) {
+    next(err)
   }
-  let doc
-  try {
-    doc = JSON.parse(raw)
-  } catch {
-    return null
-  }
-  if (doc.version !== MATCH_SNAPSHOT_VERSION) return null
-  if (doc.listFp !== listFp) return null
-  const normCanon = [...canonicalNames].sort((a, b) => a.localeCompare(b))
-  if (!Array.isArray(doc.canonicalNames) || doc.canonicalNames.length !== normCanon.length) return null
-  for (let i = 0; i < normCanon.length; i++) {
-    if (doc.canonicalNames[i] !== normCanon[i]) return null
-  }
-  if (!doc.resultsByRaw || typeof doc.resultsByRaw !== 'object') return null
-  if (!doc.parentByCanon || typeof doc.parentByCanon !== 'object') return null
-  return doc
-}
-
-/**
- * @param {object | null} listDoc
- * @returns {{ hitRowByRaw: Map<string, { raw: string, match: string | null, alternates: string[] }>, missingItems: typeof items, parentMapFromDisk: Map<string, string> | null }}
- */
-function partitionItemsWithListSnapshot(items, listDoc) {
-  if (!listDoc) {
-    return { hitRowByRaw: new Map(), missingItems: [...items], parentMapFromDisk: null }
-  }
-  const parentMap = parentByCanonObjectToMap(listDoc.parentByCanon)
-  const parentOk = parentByCanonMapComplete(parentMap, listDoc.canonicalNames)
-  const hitRowByRaw = new Map()
-  const missingItems = []
-  for (const it of items) {
-    const ifp = matcherItemFingerprint(it)
-    const ent = listDoc.resultsByRaw[it.raw]
-    if (ent && typeof ent === 'object' && ent.itemFp === ifp) {
-      const alts = Array.isArray(ent.alternates)
-        ? [...new Set(ent.alternates.filter((x) => typeof x === 'string').map((x) => x.trim()).filter(Boolean))]
-        : []
-      let match = ent.match != null && typeof ent.match === 'string' ? ent.match.trim() : null
-      if (match === '') match = null
-      hitRowByRaw.set(it.raw, { raw: it.raw, match, alternates: alts })
-    } else {
-      missingItems.push(it)
-    }
-  }
-  return { hitRowByRaw, missingItems, parentMapFromDisk: parentOk ? parentMap : null }
-}
-
-function assembleResultsFromHitsAndChunk(items, hitRowByRaw, chunkByRaw) {
-  return items.map(
-    (it) =>
-      hitRowByRaw.get(it.raw) ??
-      chunkByRaw.get(it.raw) ?? { raw: it.raw, match: null, alternates: [] },
-  )
-}
-
-function mergeListMatcherSnapshotDoc(
-  listFp,
-  canonicalNames,
-  parentByCanon,
-  previousDoc,
-  newlyResolvedItems,
-  chunkResults,
-  llmSubBatches,
-  usageTotals,
-) {
-  const normCanon = [...canonicalNames].sort((a, b) => a.localeCompare(b))
-  const prev =
-    previousDoc?.resultsByRaw && typeof previousDoc.resultsByRaw === 'object'
-      ? { ...previousDoc.resultsByRaw }
-      : {}
-  const chunkMap = new Map(chunkResults.map((r) => [r.raw, r]))
-  for (const it of newlyResolvedItems) {
-    const r = chunkMap.get(it.raw)
-    if (!r) continue
-    prev[it.raw] = {
-      itemFp: matcherItemFingerprint(it),
-      match: r.match,
-      alternates: r.alternates ?? [],
-    }
-  }
-  return {
-    version: MATCH_SNAPSHOT_VERSION,
-    listFp,
-    updatedAt: new Date().toISOString(),
-    canonicalNames: normCanon,
-    parentByCanon: parentByCanonMapToSortedObject(parentByCanon, normCanon),
-    resultsByRaw: sortResultsByRawKeys(prev),
-    meta: matchCompaniesMeta(llmSubBatches, usageTotals),
-  }
-}
-
-/**
- * @param {string} filePath
- * @param {object} doc
- */
-async function saveMatchSnapshotAtomic(filePath, doc) {
-  const dir = path.dirname(filePath)
-  await fs.mkdir(dir, { recursive: true })
-  const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`
-  await fs.writeFile(tmp, `${JSON.stringify(doc, null, 2)}\n`, 'utf8')
-  await fs.rename(tmp, filePath)
-}
+})
 
 app.post('/api/match-companies', async (req, res, next) => {
   const streamProgress = req.body && req.body.streamProgress === true
@@ -1129,65 +1059,22 @@ app.post('/api/match-companies', async (req, res, next) => {
       if (streamProgress) {
         res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
         res.setHeader('Cache-Control', 'no-cache')
-        res.write(`${JSON.stringify({ type: 'complete', results: [], meta: emptyMeta })}\n`)
+        res.write(
+          `${JSON.stringify({ type: 'complete', results: [], meta: emptyMeta, parentByCanon: {}, parentByRaw: {} })}\n`,
+        )
         return res.end()
       }
       return res.status(200).json({
         results: [],
         meta: emptyMeta,
+        parentByCanon: {},
+        parentByRaw: {},
       })
     }
 
-    const listFp = canonicalNamesFingerprint(canonicalNames)
-    const listSnapshotPath = path.join(getMatchSnapshotDir(), `list-${listFp}.json`)
-
-    let listDoc = null
-    if (!matchSnapshotDisabled()) {
-      listDoc = await tryLoadListMatcherSnapshot(listSnapshotPath, listFp, canonicalNames)
-    }
-
-    const { hitRowByRaw, missingItems, parentMapFromDisk } = partitionItemsWithListSnapshot(items, listDoc)
-
-    if (missingItems.length === 0) {
-      const fullResults = assembleResultsFromHitsAndChunk(items, hitRowByRaw, new Map())
-      console.log('[POST /api/match-companies] list snapshot full hit', {
-        path: listSnapshotPath,
-        items: items.length,
-      })
-      const metaFull = {
-        ...metaForSnapshotResponse(listDoc?.meta),
-        snapshotCacheHits: items.length,
-      }
-      if (streamProgress) {
-        res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
-        res.setHeader('Cache-Control', 'no-cache')
-        res.setHeader('X-Accel-Buffering', 'no')
-        const writeEv = (ev) => res.write(`${JSON.stringify(ev)}\n`)
-        writeEv({
-          type: 'progress',
-          phase: 'step1',
-          completed: 1,
-          total: 1,
-          cached: true,
-          detail: 'disk-snapshot',
-        })
-        writeEv({
-          type: 'progress',
-          phase: 'step2',
-          completed: 1,
-          total: 1,
-          cached: true,
-          detail: 'disk-snapshot',
-        })
-        writeEv({ type: 'progress', phase: 'step3', completed: 1, total: 1, detail: 'disk-snapshot' })
-        res.write(`${JSON.stringify({ type: 'complete', results: fullResults, meta: metaFull })}\n`)
-        return res.end()
-      }
-      return res.status(200).json({
-        results: fullResults,
-        meta: metaFull,
-      })
-    }
+    const keybookCanon = await readCompanyKeybook()
+    const keybookContact = await readContactKeybook()
+    const keybookMatch = await readContactMatchbook()
 
     if (!OPENAI_API_KEY) {
       return res.status(503).json({ error: 'LLM not configured (OPENAI_API_KEY missing)' })
@@ -1195,39 +1082,28 @@ app.post('/api/match-companies', async (req, res, next) => {
 
     const openai = new OpenAI({ apiKey: OPENAI_API_KEY })
 
-    const runPartial = async (progressSink) =>
+    const runMatcher = async (progressSink) =>
       runThreeStepMatchCompaniesWithSeed(
         openai,
         canonicalNames,
-        missingItems,
+        items,
         canonSet,
         lowerToCanon,
         progressSink,
-        parentMapFromDisk,
+        keybookCanon,
+        keybookContact,
+        keybookMatch,
       )
 
-    const maybeSaveListSnapshot = async (chunkResults, usageTotals, llmSubBatches, parentByCanon) => {
-      if (matchSnapshotDisabled()) return
-      try {
-        const doc = mergeListMatcherSnapshotDoc(
-          listFp,
-          canonicalNames,
-          parentByCanon,
-          listDoc,
-          missingItems,
-          chunkResults,
-          llmSubBatches,
-          usageTotals,
-        )
-        await saveMatchSnapshotAtomic(listSnapshotPath, doc)
-        console.log('[POST /api/match-companies] list snapshot merged', {
-          path: listSnapshotPath,
-          llmRows: missingItems.length,
-          cachedRows: hitRowByRaw.size,
-        })
-      } catch (e) {
-        console.warn('[POST /api/match-companies] list snapshot save failed', e?.message || e)
-      }
+    const persistMatchRowsAfterRun = async (allResults, parentByRaw) => {
+      const resByRaw = new Map(allResults.map((r) => [r.raw, r]))
+      await persistContactMatches(
+        items.map((it) => ({
+          raw: it.raw,
+          match: resByRaw.get(it.raw)?.match ?? null,
+          parentCompany: String(parentByRaw.get(it.raw) ?? '').trim(),
+        })),
+      )
     }
 
     if (streamProgress) {
@@ -1235,24 +1111,45 @@ app.post('/api/match-companies', async (req, res, next) => {
       res.setHeader('Cache-Control', 'no-cache')
       res.setHeader('X-Accel-Buffering', 'no')
       try {
-        const { results: chunkResults, usageTotals, llmSubBatches, parentByCanon } = await runPartial((ev) => {
+        const {
+          results: chunkResults,
+          usageTotals,
+          llmSubBatches,
+          parentByCanon,
+          parentByRaw,
+          keybookNewCanon,
+          keybookNewContact,
+        } = await runMatcher((ev) => {
           res.write(`${JSON.stringify(ev)}\n`)
         })
         const chunkByRaw = new Map(chunkResults.map((r) => [r.raw, r]))
-        const allResults = assembleResultsFromHitsAndChunk(items, hitRowByRaw, chunkByRaw)
-        await maybeSaveListSnapshot(chunkResults, usageTotals, llmSubBatches, parentByCanon)
-        const metaOut = {
-          ...matchCompaniesMeta(llmSubBatches, usageTotals),
-          snapshotCacheHits: hitRowByRaw.size,
+        const allResults = assembleMatcherChunkResults(items, chunkByRaw)
+        try {
+          await persistNewCanonParents(keybookNewCanon)
+          await persistNewContactParents(keybookNewContact)
+          await persistMatchRowsAfterRun(allResults, parentByRaw)
+        } catch (kbErr) {
+          console.warn('[POST /api/match-companies] matcher keybook persist failed', kbErr?.message || kbErr)
         }
+        const metaOut = matchCompaniesMeta(llmSubBatches, usageTotals)
+        const sortedCanon = [...canonicalNames].sort((a, b) => a.localeCompare(b))
+        const parentByCanonPayload = parentByCanonMapToSortedObject(parentByCanon, sortedCanon)
+        const parentByRawPayload = parentByRawObjectForItemsWithKeybook(parentByRaw, items, keybookContact)
         console.log('[POST /api/match-companies]', {
           items: items.length,
           llmSubBatches,
           tokens: usageTotals.totalTokens,
           stream: true,
-          snapshotCacheHits: hitRowByRaw.size,
         })
-        res.write(`${JSON.stringify({ type: 'complete', results: allResults, meta: metaOut })}\n`)
+        res.write(
+          `${JSON.stringify({
+            type: 'complete',
+            results: allResults,
+            meta: metaOut,
+            parentByCanon: parentByCanonPayload,
+            parentByRaw: parentByRawPayload,
+          })}\n`,
+        )
         return res.end()
       } catch (err) {
         const code = err.status === 429 || err.message?.includes('rate') ? 429 : err.code === 'ETIMEDOUT' ? 504 : 500
@@ -1267,22 +1164,37 @@ app.post('/api/match-companies', async (req, res, next) => {
       }
     }
 
-    const { results: chunkResults, usageTotals, llmSubBatches, parentByCanon } = await runPartial(undefined)
+    const {
+      results: chunkResults,
+      usageTotals,
+      llmSubBatches,
+      parentByCanon,
+      parentByRaw,
+      keybookNewCanon,
+      keybookNewContact,
+    } = await runMatcher(undefined)
     const chunkByRaw = new Map(chunkResults.map((r) => [r.raw, r]))
-    const allResults = assembleResultsFromHitsAndChunk(items, hitRowByRaw, chunkByRaw)
-    await maybeSaveListSnapshot(chunkResults, usageTotals, llmSubBatches, parentByCanon)
+    const allResults = assembleMatcherChunkResults(items, chunkByRaw)
+    try {
+      await persistNewCanonParents(keybookNewCanon)
+      await persistNewContactParents(keybookNewContact)
+      await persistMatchRowsAfterRun(allResults, parentByRaw)
+    } catch (kbErr) {
+      console.warn('[POST /api/match-companies] matcher keybook persist failed', kbErr?.message || kbErr)
+    }
+    const sortedCanonJson = [...canonicalNames].sort((a, b) => a.localeCompare(b))
+    const parentByCanonPayloadJson = parentByCanonMapToSortedObject(parentByCanon, sortedCanonJson)
+    const parentByRawPayloadJson = parentByRawObjectForItemsWithKeybook(parentByRaw, items, keybookContact)
     console.log('[POST /api/match-companies]', {
       items: items.length,
       llmSubBatches,
       tokens: usageTotals.totalTokens,
-      snapshotCacheHits: hitRowByRaw.size,
     })
     return res.status(200).json({
       results: allResults,
-      meta: {
-        ...matchCompaniesMeta(llmSubBatches, usageTotals),
-        snapshotCacheHits: hitRowByRaw.size,
-      },
+      meta: matchCompaniesMeta(llmSubBatches, usageTotals),
+      parentByCanon: parentByCanonPayloadJson,
+      parentByRaw: parentByRawPayloadJson,
     })
   } catch (err) {
     if (err.status === 429) return res.status(429).json({ error: 'Rate limit exceeded' })

@@ -47,6 +47,8 @@ import { downloadCsv, sanitizeFilenameSegment } from './utils/exportCsv'
 import { ImportWorkflowDialog, type UploadImportKind } from './components/UploadDropZone'
 import { AgContactsGrid } from './components/AgContactsGrid'
 import { AgCompaniesGrid } from './components/AgCompaniesGrid'
+import { ParentKeyGrid, type ParentKeyRow } from './components/ParentKeyGrid'
+import { MatchKeyGrid } from './components/MatchKeyGrid'
 import { CompanySelect } from './components/CompanySelect'
 import { postChat } from './api/chat'
 import {
@@ -61,13 +63,23 @@ import {
   type MatcherLlmProgress,
   type MatcherSelectionProvenance,
 } from './components/MatcherReviewPanel'
-import { MATCH_MATCHER_CLIENT_BATCH_SIZE } from './constants/companyMatch'
+import {
+  MATCH_MATCHER_CLIENT_BATCH_SIZE,
+  MATCH_MATCHER_CONCURRENT_HTTP,
+} from './constants/companyMatch'
 import {
   estimateOpenAiChatCostUsd,
   formatUsdEstimate,
   MATCH_COMPANIES_OPENAI_MODEL,
 } from './constants/openaiPricing'
-import { canonicalNamesFromCompanies, matchDeterministicBatch } from './utils/companyMatch'
+import { canonicalNamesFromCompanies } from './utils/companyMatch'
+import { buildMatchKeyGridRows } from './utils/matcherContactMatchGrid'
+import {
+  getMatcherKeybook,
+  type MatcherKeybookContactMatchRow,
+  type MatcherKeybookSnapshot,
+} from './api/matcherKeybook'
+import { computeMatcherKeybookCoverage } from './utils/matcherKeybookCoverage'
 
 function applyMatcherStreamProgress(
   prev: MatcherLlmProgress | null,
@@ -95,7 +107,14 @@ function applyMatcherStreamProgress(
   return { completed: base.completed, total: base.total, server }
 }
 
-type TabValue = 'contacts' | 'companies' | 'normalizer' | 'matcher'
+type TabValue =
+  | 'contacts'
+  | 'companies'
+  | 'normalizer'
+  | 'matcher'
+  | 'companyKey'
+  | 'contactCompanyKey'
+  | 'contactCompanyMatch'
 
 type WorkspaceMode = 'normalizer' | 'matcher'
 
@@ -141,6 +160,13 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
   const [matcherLlmProgress, setMatcherLlmProgress] = useState<MatcherLlmProgress | null>(null)
   const [matcherHttpWaiting, setMatcherHttpWaiting] = useState(false)
   const [matcherRunLog, setMatcherRunLog] = useState<string[]>([])
+  const [matcherParentByCanon, setMatcherParentByCanon] = useState<Record<string, string>>({})
+  const [matcherParentByRaw, setMatcherParentByRaw] = useState<Record<string, string>>({})
+  const [matcherContactMatchRows, setMatcherContactMatchRows] = useState<MatcherKeybookContactMatchRow[]>([])
+  const [matcherKeybookSnapshot, setMatcherKeybookSnapshot] = useState<MatcherKeybookSnapshot | null>(null)
+  const [contactCompanyMatchMatchedOnly, setContactCompanyMatchMatchedOnly] = useState(false)
+  /** In-flight POST /api/match-companies count (matcher uses parallel batches when >1). */
+  const matcherHttpInFlightRef = useRef(0)
 
   const handleContactsFileAccepted = useCallback(async (file: File) => {
     setParseError(null)
@@ -159,6 +185,9 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     setMatcherHttpWaiting(false)
     setMatcherRunLog([])
     setMatcherError(null)
+    setMatcherParentByCanon({})
+    setMatcherParentByRaw({})
+    setMatcherContactMatchRows([])
     try {
       const { data, headers: h, companyColumnKey: key, entityColumnKey: entityKey } = await parseContactFile(file)
       setContacts(data)
@@ -189,6 +218,9 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     setMatcherHttpWaiting(false)
     setMatcherRunLog([])
     setMatcherError(null)
+    setMatcherParentByCanon({})
+    setMatcherParentByRaw({})
+    setMatcherContactMatchRows([])
     try {
       const { data, headers: h } = await parseCompanyFile(file)
       setCompanies(data)
@@ -227,6 +259,61 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
 
   const matcherCanonicalNames = useMemo(() => canonicalNamesFromCompanies(companies), [companies])
 
+  const companyKeyRows = useMemo<ParentKeyRow[]>(
+    () =>
+      matcherCanonicalNames
+        .slice()
+        .sort((a, b) => a.localeCompare(b))
+        .map((name) => ({
+          name,
+          parentCompany: (matcherParentByCanon[name] ?? '').trim(),
+        })),
+    [matcherCanonicalNames, matcherParentByCanon],
+  )
+
+  const contactCompanyKeyRows = useMemo<ParentKeyRow[]>(() => {
+    if (!companyColumnKey) return []
+    const sorted = [...uniqueCompanyNames].sort((a, b) => a.localeCompare(b))
+    return sorted.map((raw) => {
+      const fromRaw = (matcherParentByRaw[raw] ?? '').trim()
+      const sel = (matcherSelections[raw] ?? '').trim()
+      const fromCanon = sel ? (matcherParentByCanon[sel] ?? '').trim() : ''
+      return { name: raw, parentCompany: fromRaw || fromCanon }
+    })
+  }, [uniqueCompanyNames, companyColumnKey, matcherParentByRaw, matcherParentByCanon, matcherSelections])
+
+  const contactCompanyMatchGridRows = useMemo(
+    () => buildMatchKeyGridRows(matcherContactMatchRows, companies),
+    [matcherContactMatchRows, companies],
+  )
+
+  const matcherKeybookCoverage = useMemo(
+    () => computeMatcherKeybookCoverage(matcherKeybookSnapshot, matcherCanonicalNames, uniqueCompanyNames),
+    [matcherKeybookSnapshot, matcherCanonicalNames, uniqueCompanyNames],
+  )
+
+  useEffect(() => {
+    if (activeTab !== 'contactCompanyMatch') {
+      setContactCompanyMatchMatchedOnly(false)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const snap = await getMatcherKeybook()
+        if (!cancelled) {
+          setMatcherContactMatchRows(snap.contactCompanyMatch)
+          if (workspaceMode === 'matcher') setMatcherKeybookSnapshot(snap)
+        }
+      } catch {
+        if (!cancelled) setMatcherContactMatchRows([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, workspaceMode])
+
   /** Match every unique contact company string via LLM against the companies file Name list (closed list on server). */
   const handleRunMatcher = useCallback(async () => {
     if (!companyColumnKey || !contacts.length || !companies.length) return
@@ -237,6 +324,8 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     setMatcherLlmProgress(null)
     setMatcherHttpWaiting(false)
     setMatcherRunLog([])
+    setMatcherParentByCanon({})
+    setMatcherParentByRaw({})
     try {
       const canon = canonicalNamesFromCompanies(companies)
       const raws = uniqueCompanyNames
@@ -262,18 +351,23 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
         pushMatcherLog(
           `${totalBatches} HTTP batch(es) (max ${MATCH_MATCHER_CLIENT_BATCH_SIZE} strings each); each batch may run several model calls on the server.`,
         )
+        if (MATCH_MATCHER_CONCURRENT_HTTP > 1) {
+          pushMatcherLog(
+            `Up to ${MATCH_MATCHER_CONCURRENT_HTTP} batches in parallel; per-step NDJSON progress is off during parallel runs.`,
+          )
+        }
         setMatcherLlmProgress({ completed: 0, total: totalBatches })
-        const { results: llmResults, usageTotals, matcherModel } = await postMatchCompaniesBatched(
+        matcherHttpInFlightRef.current = 0
+        const { results: llmResults, usageTotals, matcherModel, parentByCanon, parentByRaw } =
+          await postMatchCompaniesBatched(
           canon,
           llmItems,
           {
             clientBatchSize: MATCH_MATCHER_CLIENT_BATCH_SIZE,
+            concurrency: MATCH_MATCHER_CONCURRENT_HTTP,
             onHttpRequestStart: ({ batchIndex, batchTotal, itemCount }) => {
+              matcherHttpInFlightRef.current += 1
               setMatcherHttpWaiting(true)
-              setMatcherLlmProgress({
-                completed: Math.max(0, batchIndex - 1),
-                total: batchTotal,
-              })
               pushMatcherLog(`Batch ${batchIndex}/${batchTotal}: sending ${itemCount} string(s)…`)
             },
             onHttpRequestComplete: ({
@@ -284,7 +378,10 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
               modelThisRequest,
               usageThisRequest,
             }) => {
-              setMatcherHttpWaiting(false)
+              matcherHttpInFlightRef.current = Math.max(0, matcherHttpInFlightRef.current - 1)
+              if (matcherHttpInFlightRef.current === 0) {
+                setMatcherHttpWaiting(false)
+              }
               const sub =
                 serverLlmSubBatches != null
                   ? ` Server ran ${serverLlmSubBatches} model sub-batch(es) for this request.`
@@ -315,6 +412,8 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
         )
         matcherRunUsageTotals = usageTotals
         matcherPricingModel = matcherModel
+        setMatcherParentByCanon(parentByCanon)
+        setMatcherParentByRaw(parentByRaw)
         for (const r of llmResults) {
           llmByRaw.set(r.raw, { match: r.match, alternates: r.alternates })
         }
@@ -323,18 +422,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
         pushMatcherLog('No unique company strings — skipping model.')
       }
 
-      const nullRaws: string[] = []
       const provenance: Record<string, MatcherSelectionProvenance> = {}
-
-      for (const raw of raws) {
-        const llm = llmByRaw.get(raw)
-        const ok = Boolean(llm?.match && canon.includes(llm.match))
-        if (!ok) nullRaws.push(raw)
-      }
-
-      pushMatcherLog(`Local scoring for ${nullRaws.length} string(s) without a model match…`)
-      const detRows = matchDeterministicBatch(nullRaws, canon)
-      const detByRaw = new Map(detRows.map((row) => [row.raw, row] as const))
 
       const rows: MatcherRowModel[] = []
       const initSel: Record<string, string> = {}
@@ -347,23 +435,12 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
         if (llm?.alternates) for (const a of llm.alternates) hints.add(a)
 
         const llmOk = Boolean(llm?.match && canon.includes(llm.match))
-        let suggested: string | null = llmOk ? llm!.match! : null
-        let source: MatcherRowModel['source'] = 'llm'
-        let selection = llmOk ? llm!.match! : ''
+        const suggested: string | null = llmOk ? llm!.match! : null
+        const source: MatcherRowModel['source'] = llmOk ? 'llm' : 'ambiguous'
 
         if (llmOk) {
           provenance[raw] = 'llm'
-        } else {
-          const det = detByRaw.get(raw)
-          if (det?.tier === 'auto' && det.best) {
-            suggested = det.best
-            selection = det.best
-            source = 'deterministic_fallback'
-            provenance[raw] = 'deterministic'
-            for (const c of det.topCandidates) hints.add(c.name)
-          } else {
-            for (const c of det?.topCandidates ?? []) hints.add(c.name)
-          }
+          initSel[raw] = llm!.match!
         }
 
         rows.push({
@@ -373,8 +450,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
           suggested,
           optionHints: [...hints],
         })
-
-        initSel[raw] = selection
       }
 
       rows.sort((a, b) => a.raw.localeCompare(b.raw))
@@ -383,11 +458,9 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
       setMatcherSelectionProvenance(provenance)
 
       let nLlm = 0
-      let nDet = 0
       let nOpen = 0
       for (const row of rows) {
         if (row.source === 'llm' && row.suggested) nLlm++
-        else if (row.source === 'deterministic_fallback') nDet++
         else if (!row.suggested) nOpen++
       }
       setMatcherRunLog((prev) => {
@@ -397,7 +470,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
           second: '2-digit',
         })
         const lines = [
-          `[${ts}] Finished: ${nLlm} from model, ${nDet} fuzzy auto-fill, ${nOpen} need your pick.`,
+          `[${ts}] Finished: ${nLlm} from model, ${nOpen} need your pick.`,
         ]
         if (llmItems.length > 0 && matcherRunUsageTotals != null) {
           const modelForEst = matcherPricingModel?.trim() || MATCH_COMPANIES_OPENAI_MODEL
@@ -420,6 +493,13 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
         }
         return [...prev.slice(-199), ...lines]
       })
+      try {
+        const snap = await getMatcherKeybook()
+        setMatcherContactMatchRows(snap.contactCompanyMatch)
+        setMatcherKeybookSnapshot(snap)
+      } catch {
+        /* keybook GET is optional; matcher already persisted server-side */
+      }
     } catch (e) {
       setMatcherError(e instanceof Error ? e.message : 'Matcher failed')
       setMatcherRunLog((prev) => {
@@ -432,6 +512,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
         return [...prev.slice(-199), `[${ts}] Error: ${msg}`]
       })
     } finally {
+      matcherHttpInFlightRef.current = 0
       setMatcherRunning(false)
       setMatcherLlmProgress(null)
       setMatcherHttpWaiting(false)
@@ -582,6 +663,25 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
 
   const hasContacts = contacts.length > 0
   const hasCompanies = companies.length > 0
+
+  useEffect(() => {
+    if (workspaceMode !== 'matcher' || !hasContacts) {
+      setMatcherKeybookSnapshot(null)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const snap = await getMatcherKeybook()
+        if (!cancelled) setMatcherKeybookSnapshot(snap)
+      } catch {
+        if (!cancelled) setMatcherKeybookSnapshot(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [workspaceMode, hasContacts, matcherCanonicalNames.length, uniqueCompanyNames.length])
   const showNormalizerActivity = aiSearchLoading || processLogLines.length > 0
 
   useEffect(() => {
@@ -706,6 +806,37 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
             >
               List-O-Matic 2000
             </Typography>
+            {activeTab === 'contactCompanyMatch' && (
+              <Tooltip
+                title={
+                  contactCompanyMatchMatchedOnly
+                    ? 'Show every row from the persisted snapshot.'
+                    : 'Hide rows where Matched company is empty; keep the quick filter for text search.'
+                }
+              >
+                <Button
+                  variant={contactCompanyMatchMatchedOnly ? 'contained' : 'outlined'}
+                  size="small"
+                  color="inherit"
+                  onClick={() => setContactCompanyMatchMatchedOnly((v) => !v)}
+                  sx={{
+                    ml: { xs: 1, sm: 2 },
+                    flexShrink: 0,
+                    whiteSpace: 'nowrap',
+                    ...(!contactCompanyMatchMatchedOnly
+                      ? { borderColor: 'rgba(255,255,255,0.45)' }
+                      : {
+                          bgcolor: 'primary.contrastText',
+                          color: 'primary.main',
+                          '&:hover': { bgcolor: 'primary.contrastText', opacity: 0.92 },
+                        }),
+                  }}
+                  data-testid="header-contact-company-match-matched-only"
+                >
+                  {contactCompanyMatchMatchedOnly ? 'Show all rows' : 'Matched rows only'}
+                </Button>
+              </Tooltip>
+            )}
           </Box>
           <IconButton
             color="inherit"
@@ -1006,41 +1137,91 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
 
             {workspaceMode !== null && (
               <>
-            <Tabs
-              value={activeTab}
-              onChange={(_, v: TabValue) => setActiveTab(v)}
-              variant="scrollable"
-              scrollButtons="auto"
-              allowScrollButtonsMobile
+            <Box
               sx={{
-                mb: 0,
-                minHeight: 40,
+                display: 'flex',
+                alignItems: 'flex-end',
                 flexShrink: 0,
                 borderBottom: 1,
                 borderColor: 'divider',
-                '& .MuiTab-root': { minHeight: 40, py: 0.5, fontSize: '0.8rem', textTransform: 'none' },
+                gap: 0,
               }}
-              textColor="primary"
-              indicatorColor="primary"
-              data-testid="tabs-main"
             >
-              <Tab label="Contacts" value="contacts" data-testid="tab-contacts" />
-              <Tab label="Companies" value="companies" data-testid="tab-companies" />
-              {workspaceMode === 'normalizer' && (
+              <Tabs
+                value={
+                  activeTab === 'contacts' ||
+                  activeTab === 'companies' ||
+                  activeTab === 'normalizer' ||
+                  activeTab === 'matcher'
+                    ? activeTab
+                    : false
+                }
+                onChange={(_, v: TabValue) => setActiveTab(v)}
+                variant="scrollable"
+                scrollButtons="auto"
+                allowScrollButtonsMobile
+                sx={{
+                  flex: '0 1 auto',
+                  minHeight: 40,
+                  mb: 0,
+                  borderBottom: 0,
+                  maxWidth: { xs: '100%', md: '70%' },
+                  '& .MuiTab-root': { minHeight: 40, py: 0.5, fontSize: '0.8rem', textTransform: 'none' },
+                }}
+                textColor="primary"
+                indicatorColor="primary"
+                data-testid="tabs-main"
+              >
+                <Tab label="Contacts" value="contacts" data-testid="tab-contacts" />
+                <Tab label="Companies" value="companies" data-testid="tab-companies" />
+                {workspaceMode === 'normalizer' && (
+                  <Tab
+                    label="Contact Company Normalizer"
+                    value="normalizer"
+                    data-testid="tab-results-normalizer"
+                  />
+                )}
+                {workspaceMode === 'matcher' && (
+                  <Tab
+                    label="Contact Company Matcher"
+                    value="matcher"
+                    data-testid="tab-results-matcher"
+                  />
+                )}
+              </Tabs>
+              <Box sx={{ flex: 1, minWidth: 8 }} aria-hidden />
+              <Tabs
+                value={
+                  activeTab === 'companyKey' ||
+                  activeTab === 'contactCompanyKey' ||
+                  activeTab === 'contactCompanyMatch'
+                    ? activeTab
+                    : false
+                }
+                onChange={(_, v: TabValue) => setActiveTab(v)}
+                variant="scrollable"
+                scrollButtons="auto"
+                allowScrollButtonsMobile
+                sx={{
+                  flex: '0 0 auto',
+                  minHeight: 40,
+                  mb: 0,
+                  borderBottom: 0,
+                  '& .MuiTab-root': { minHeight: 40, py: 0.5, fontSize: '0.8rem', textTransform: 'none' },
+                }}
+                textColor="primary"
+                indicatorColor="primary"
+                data-testid="tabs-key-reference"
+              >
+                <Tab label="Company Key" value="companyKey" data-testid="tab-company-key" />
+                <Tab label="Contact Company Key" value="contactCompanyKey" data-testid="tab-contact-company-key" />
                 <Tab
-                  label="Contact Company Normalizer"
-                  value="normalizer"
-                  data-testid="tab-results-normalizer"
+                  label="Contact Company Match"
+                  value="contactCompanyMatch"
+                  data-testid="tab-contact-company-match"
                 />
-              )}
-              {workspaceMode === 'matcher' && (
-                <Tab
-                  label="Contact Company Matcher"
-                  value="matcher"
-                  data-testid="tab-results-matcher"
-                />
-              )}
-            </Tabs>
+              </Tabs>
+            </Box>
 
             <Box sx={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', pt: 2 }}>
             {activeTab === 'contacts' && (
@@ -1524,6 +1705,21 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
 
             {activeTab === 'matcher' && (
               <Box sx={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                {matcherKeybookCoverage != null && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ flexShrink: 0, mb: 0.5 }}
+                    data-testid="matcher-keybook-coverage"
+                  >
+                    Keybook coverage — Company Key: {matcherKeybookCoverage.companyKeyWithParent.toLocaleString()} /{' '}
+                    {matcherKeybookCoverage.companyKeyTotal.toLocaleString()} names with parent. Contact Company Key:{' '}
+                    {matcherKeybookCoverage.contactKeyWithParent.toLocaleString()} /{' '}
+                    {matcherKeybookCoverage.contactKeyTotal.toLocaleString()} import strings with parent. When both
+                    fractions are full, the matcher skips step 1 and step 2 LLM parent passes (step 3 + optional
+                    fallback may still run).
+                  </Typography>
+                )}
                 <MatcherReviewPanel
                   canRun={matcherCanRun}
                   running={matcherRunning}
@@ -1539,9 +1735,81 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                   llmProgress={matcherLlmProgress}
                   httpWaiting={matcherHttpWaiting}
                   runLog={matcherRunLog}
+                  matcherParentByRaw={matcherParentByRaw}
+                  matcherParentByCanon={matcherParentByCanon}
                   onSelectionChange={handleMatcherSelectionChange}
                   onRun={handleRunMatcher}
                 />
+              </Box>
+            )}
+
+            {activeTab === 'companyKey' && (
+              <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                {!hasCompanies ? (
+                  <Typography color="text.secondary" variant="body2">
+                    Import a companies file to see the Company Key.
+                  </Typography>
+                ) : (
+                  <>
+                    <Typography variant="caption" color="text.secondary">
+                      Canonical names from your companies file (Name column). Parent labels appear after you run the
+                      Contact Company Matcher.
+                    </Typography>
+                    <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                      <ParentKeyGrid
+                        rows={companyKeyRows}
+                        nameHeader="Company"
+                        fillContainer
+                        data-testid="company-key-grid"
+                      />
+                    </Box>
+                  </>
+                )}
+              </Box>
+            )}
+
+            {activeTab === 'contactCompanyKey' && (
+              <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                {!companyColumnKey || uniqueCompanyNames.length === 0 ? (
+                  <Typography color="text.secondary" variant="body2">
+                    Import contacts with a company column to see the Contact Company Key.
+                  </Typography>
+                ) : (
+                  <>
+                    <Typography variant="caption" color="text.secondary">
+                      Unique company strings from your contacts. Parent labels fill in after the matcher runs; if a row
+                      was served from cache without a per-import parent, the parent of your selected match is used when
+                      available.
+                    </Typography>
+                    <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                      <ParentKeyGrid
+                        rows={contactCompanyKeyRows}
+                        nameHeader="Contact company"
+                        fillContainer
+                        data-testid="contact-company-key-grid"
+                      />
+                    </Box>
+                  </>
+                )}
+              </Box>
+            )}
+
+            {activeTab === 'contactCompanyMatch' && (
+              <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Persisted on the server after each successful matcher run (contact-company-match.jsonl). CRM company
+                  is the master-list label from your companies import for the matched row (Name, or CRM Company when
+                  that column is present). Matched company is the closed-list pick; parent company is the inferred parent
+                  for that import string (may be empty).
+                </Typography>
+                <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                  <MatchKeyGrid
+                    rows={contactCompanyMatchGridRows}
+                    fillContainer
+                    data-testid="contact-company-match-grid"
+                    matchedOnly={contactCompanyMatchMatchedOnly}
+                  />
+                </Box>
               </Box>
             )}
             </Box>

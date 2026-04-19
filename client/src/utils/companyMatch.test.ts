@@ -14,7 +14,7 @@ import {
   buildMatcherTableExport,
   MATCHER_TABLE_EXPORT_MATCH_HEADER,
 } from './companyMatch'
-import type { CompanyRow } from './parseFile'
+import type { CompanyRow, ContactRow } from './parseFile'
 
 describe('normalizeForMatch', () => {
   it('lowercases and collapses spaces', () => {
@@ -125,9 +125,9 @@ describe('buildMatcherTableExport', () => {
     const { data, csvHeaders } = buildMatcherTableExport(contacts, headers, 'Company', {
       Acme: 'Acme Holdings',
     })
-    expect(csvHeaders).toEqual(['Email', 'Company (import)', MATCHER_TABLE_EXPORT_MATCH_HEADER, 'City'])
+    expect(csvHeaders).toEqual(['Email', 'Company (Import)', MATCHER_TABLE_EXPORT_MATCH_HEADER, 'City'])
     expect(data[0]['Email']).toBe('a@x.com')
-    expect(data[0]['Company (import)']).toBe('Acme')
+    expect(data[0]['Company (Import)']).toBe('Acme')
     expect(data[0][MATCHER_TABLE_EXPORT_MATCH_HEADER]).toBe('Acme Holdings')
     expect(data[0].City).toBe('NYC')
   })

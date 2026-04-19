@@ -23,11 +23,11 @@ export type MatchCompaniesResponse = {
     llmSubBatches?: number
     usage?: MatchCompaniesUsageTotals
     model?: string
-    /** True when results were served from a disk snapshot (no LLM calls). */
-    fromSnapshot?: boolean
-    /** Rows resolved from the on-disk list snapshot without LLM (partial runs include this). */
-    snapshotCacheHits?: number
   }
+  /** Canonical companies-file Name → inferred parent (matcher step 1). */
+  parentByCanon?: Record<string, string>
+  /** Contact import company string → inferred parent for that batch (matcher step 2). */
+  parentByRaw?: Record<string, string>
 }
 
 /** One NDJSON `progress` line from POST /api/match-companies when `streamProgress: true`. */
@@ -74,6 +74,8 @@ async function readMatchCompaniesNdjsonStream(
       detail?: string
       results?: MatchCompanyResult[]
       meta?: MatchCompaniesResponse['meta']
+      parentByCanon?: Record<string, string>
+      parentByRaw?: Record<string, string>
       error?: string
     }
     if (msg.type === 'progress' && msg.phase) {
@@ -86,7 +88,14 @@ async function readMatchCompaniesNdjsonStream(
       })
     }
     if (msg.type === 'complete') {
-      complete = { results: msg.results ?? [], meta: msg.meta }
+      complete = {
+        results: msg.results ?? [],
+        meta: msg.meta,
+        ...(msg.parentByCanon && typeof msg.parentByCanon === 'object'
+          ? { parentByCanon: msg.parentByCanon }
+          : {}),
+        ...(msg.parentByRaw && typeof msg.parentByRaw === 'object' ? { parentByRaw: msg.parentByRaw } : {}),
+      }
     }
     if (msg.type === 'error') {
       throw new Error(msg.error?.trim() || 'Match request failed')
@@ -136,7 +145,11 @@ export async function postMatchCompanies(
   }
   const ct = res.headers.get('content-type') ?? ''
   if (streamProgress && ct.includes('application/x-ndjson')) {
-    return readMatchCompaniesNdjsonStream(res, options.onStreamProgress!)
+    const onStream = options?.onStreamProgress
+    if (!onStream) {
+      throw new Error('streamProgress requires onStreamProgress callback')
+    }
+    return readMatchCompaniesNdjsonStream(res, onStream)
   }
   return res.json() as Promise<MatchCompaniesResponse>
 }
@@ -144,6 +157,11 @@ export async function postMatchCompanies(
 export type PostMatchCompaniesBatchedOptions = {
   /** Chunk size for this run (default {@link MATCH_API_BATCH_SIZE}). */
   clientBatchSize?: number
+  /**
+   * Max concurrent POST /api/match-companies calls (default 1 = sequential).
+   * Values above 1 disable NDJSON streaming for each call (interleaved streams would break progress UI).
+   */
+  concurrency?: number
   /** Fires immediately before each POST. */
   onHttpRequestStart?: (info: Omit<MatchCompaniesHttpInfo, 'serverLlmSubBatches'>) => void
   /** Fires after each POST returns successfully. */
@@ -160,6 +178,10 @@ export type PostMatchCompaniesBatchedResult = {
   usageTotals: MatchCompaniesUsageTotals | null
   /** Last non-empty `meta.model` seen across HTTP responses; null if never sent. */
   matcherModel: string | null
+  /** Merged across all HTTP chunks in this batched call. */
+  parentByCanon: Record<string, string>
+  /** Merged across all HTTP chunks in this batched call. */
+  parentByRaw: Record<string, string>
 }
 
 function addUsage(
@@ -173,41 +195,87 @@ function addUsage(
   return true
 }
 
-/** Split items into batches; run sequentially to avoid huge payloads. */
+function mergeParentRecord(into: Record<string, string>, from: Record<string, string> | undefined) {
+  if (!from || typeof from !== 'object') return
+  for (const [k, v] of Object.entries(from)) {
+    if (typeof v === 'string') into[k] = v
+  }
+}
+
+/** Split items into batches; run sequentially or with a bounded worker pool. */
 export async function postMatchCompaniesBatched(
   canonicalNames: string[],
   items: MatchCompanyItem[],
   options?: PostMatchCompaniesBatchedOptions
 ): Promise<PostMatchCompaniesBatchedResult> {
-  if (items.length === 0) return { results: [], usageTotals: null, matcherModel: null }
+  if (items.length === 0) {
+    return { results: [], usageTotals: null, matcherModel: null, parentByCanon: {}, parentByRaw: {} }
+  }
   const chunkSize = options?.clientBatchSize ?? MATCH_API_BATCH_SIZE
   const total = Math.ceil(items.length / chunkSize)
-  const all: MatchCompanyResult[] = []
+  const batches: { batchIndex: number; chunk: MatchCompanyItem[] }[] = []
+  for (let i = 0; i < items.length; i += chunkSize) {
+    batches.push({
+      batchIndex: Math.floor(i / chunkSize) + 1,
+      chunk: items.slice(i, i + chunkSize),
+    })
+  }
+
+  const concurrency = Math.min(12, Math.max(1, Math.floor(options?.concurrency ?? 1)))
+  const useNdjsonStream = concurrency === 1 && Boolean(options?.onServerStreamProgress)
+
   const usageTotals: MatchCompaniesUsageTotals = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
   let sawAnyUsage = false
   let matcherModel: string | null = null
-  for (let i = 0; i < items.length; i += chunkSize) {
-    const chunk = items.slice(i, i + chunkSize)
-    const batchIndex = Math.floor(i / chunkSize) + 1
-    options?.onHttpRequestStart?.({ batchIndex, batchTotal: total, itemCount: chunk.length })
-    const { results, meta } = await postMatchCompanies(
+  const parentByCanon: Record<string, string> = {}
+  const parentByRaw: Record<string, string> = {}
+  const resultsByIndex: MatchCompanyResult[][] = new Array(batches.length)
+  let completedBatches = 0
+
+  async function runOneBatch(b: { batchIndex: number; chunk: MatchCompanyItem[] }) {
+    options?.onHttpRequestStart?.({ batchIndex: b.batchIndex, batchTotal: total, itemCount: b.chunk.length })
+    const { results, meta, parentByCanon: pc, parentByRaw: pr } = await postMatchCompanies(
       canonicalNames,
-      chunk,
-      options?.onServerStreamProgress ? { onStreamProgress: options.onServerStreamProgress } : undefined
+      b.chunk,
+      useNdjsonStream && options?.onServerStreamProgress
+        ? { onStreamProgress: options.onServerStreamProgress }
+        : undefined,
     )
-    all.push(...results)
+    resultsByIndex[b.batchIndex - 1] = results
+    mergeParentRecord(parentByCanon, pc)
+    mergeParentRecord(parentByRaw, pr)
     if (addUsage(usageTotals, meta?.usage)) sawAnyUsage = true
     const m = meta?.model?.trim()
     if (m) matcherModel = m
     options?.onHttpRequestComplete?.({
-      batchIndex,
+      batchIndex: b.batchIndex,
       batchTotal: total,
-      itemCount: chunk.length,
+      itemCount: b.chunk.length,
       serverLlmSubBatches: meta?.llmSubBatches,
       modelThisRequest: m,
       usageThisRequest: meta?.usage,
     })
-    options?.onBatchProgress?.(batchIndex, total)
+    completedBatches += 1
+    options?.onBatchProgress?.(completedBatches, total)
   }
-  return { results: all, usageTotals: sawAnyUsage ? usageTotals : null, matcherModel }
+
+  const workerCount = Math.min(concurrency, batches.length)
+  let nextBatch = 0
+  const workers = Array.from({ length: workerCount }, async () => {
+    for (;;) {
+      const idx = nextBatch++
+      if (idx >= batches.length) break
+      await runOneBatch(batches[idx])
+    }
+  })
+  await Promise.all(workers)
+
+  const all = resultsByIndex.flat()
+  return {
+    results: all,
+    usageTotals: sawAnyUsage ? usageTotals : null,
+    matcherModel,
+    parentByCanon,
+    parentByRaw,
+  }
 }

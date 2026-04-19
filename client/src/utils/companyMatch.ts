@@ -357,11 +357,15 @@ export function pickMatchedCompanyHeader(existingHeaders: string[]): string {
   return `${base} ${i}`
 }
 
-/** CSV column for the match dropdown; must match `AgMatcherContactsGrid` headerName. */
+/**
+ * Legacy export: second CSV column uses the contact file’s company column key (e.g. `Company`),
+ * not a `(CRM)` suffix (that label is grid-only).
+ */
 export const MATCHER_TABLE_EXPORT_MATCH_HEADER = 'Company'
 
 /**
  * Build rows and header list for exporting the matcher preview table (same column order as the grid).
+ * Import column is `{companyColumnKey} (Import)`; matched values use the plain column key (no `(CRM)`).
  */
 export function buildMatcherTableExport(
   contacts: ContactRow[],
@@ -372,8 +376,8 @@ export function buildMatcherTableExport(
   const csvHeaders: string[] = []
   for (const h of headers) {
     if (h === companyColumnKey) {
-      csvHeaders.push(`${h} (import)`)
-      csvHeaders.push(MATCHER_TABLE_EXPORT_MATCH_HEADER)
+      csvHeaders.push(`${h} (Import)`)
+      csvHeaders.push(h)
     } else {
       csvHeaders.push(h)
     }
@@ -383,8 +387,8 @@ export function buildMatcherTableExport(
     for (const h of headers) {
       if (h === companyColumnKey) {
         const raw = String(row[h] ?? '').trim()
-        out[`${h} (import)`] = String(row[h] ?? '')
-        out[MATCHER_TABLE_EXPORT_MATCH_HEADER] = selection[raw] ?? ''
+        out[`${h} (Import)`] = String(row[h] ?? '')
+        out[h] = selection[raw] ?? ''
       } else {
         out[h] = String(row[h] ?? '')
       }

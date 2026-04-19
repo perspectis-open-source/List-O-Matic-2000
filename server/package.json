@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "node --watch index.js",
     "start": "node index.js",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "wipe-matcher-data": "node scripts/wipeMatcherStorage.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

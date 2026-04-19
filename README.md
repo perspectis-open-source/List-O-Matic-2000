@@ -93,12 +93,21 @@ Upload via **Import contacts** / **Import companies** on the start screen.
 | `OPENAI_API_KEY` | OpenAI API key (or equivalent)       |
 | `CORS_ORIGIN`    | Frontend origin (e.g. http://localhost:5173) |
 | `PORT`           | Server port (e.g. 3001)              |
-| `MATCH_SNAPSHOT_DIR` | Optional. Directory for **matcher snapshots** (`POST /api/match-companies`). Default: `server/data/matcher-snapshots/`. |
-| `MATCH_SNAPSHOT_DISABLE` | If `true` / `1` / `yes`, skip reading and writing snapshots (always call the LLM). |
+| `MATCHER_KEYBOOK_DIR` | Optional. Directory for matcher **JSONL keybooks** (`company-key.jsonl`, `contact-company-key.jsonl`, `contact-company-match.jsonl`) used by `POST /api/match-companies` to seed parents and matches and to append new rows after successful runs. Default: `server/data/matcher-keybook/`. |
 
-### Matcher disk snapshots
+### Matcher JSONL keybook
 
-After a matcher run, the server merges **`results`** into one JSON file per **companies list** (`list-<hash>.json`): contact rows are keyed by import `raw` plus a fingerprint of `topCandidates`, and **`parentByCanon`** is stored for the list. If every row in the request is already in that file, the handler returns immediately (no LLM; **works without `OPENAI_API_KEY`**). If only some rows match, it runs the LLM **only for missing rows** and **appends** them to the same file. See `server/.env.example`. Default directory: `server/data/matcher-snapshots/` (gitignored unless you change that).
+The server reads **`company-key.jsonl`** and **`contact-company-key.jsonl`** (see `server/data/matcher-keybook/*.jsonl.example`) to seed inferred **parent** labels for, respectively, each companies-file **`Name`** and each unique contact import **`raw`**. Those two files are what determine whether **step 1** (LLM parents for canonical names) and **step 2** (LLM parents for contact raws) have any work left: if every current `Name` already has a non-empty parent in `company-key.jsonl`, step 1 does not call the model; if every current `raw` already has a non-empty parent in `contact-company-key.jsonl`, step 2 does not call the model.
+
+**`contact-company-match.jsonl`** stores one row per contact import string: `raw`, optional `match` (companies-file `Name`), and `parentCompany`. The matcher (a) **replays** stored `match` values before the **fallback** closed-list LLM when the stored name is still in the current companies list, and (b) **backfills** `contact-company-key.jsonl`: for any `raw` missing from the contact key, if the match row has a non-empty `parentCompany`, that parent is applied for step 2 seeding and written into `contact-company-key.jsonl` so repeat runs do not depend on the contact key alone having been populated first.
+
+**Step 3** aligns those parents to pick a list `Name` without the LLM. **Fallback** (`askMatchCompaniesLLM`) runs for raws that still lack a closed-list `match` after step 3 and replay **when** that contact has **no** inferred parent in `parentByRaw` (nothing to align in step 3), **or** when it has a parent but there is no persisted outcome yet, or a non-empty stored `match` must be retried. If the contact **has** a parent **and** the match keybook already stores an explicit empty/`null` `match`, repeat runs skip fallback (clear the keybook line or change data if you need a fresh attempt).
+
+**GET `/api/matcher-keybook`** returns sorted arrays for the Company Key, Contact Company Key, and Contact Company Match reference tables (no auth in the demo server). The Contact Company Matcher tab shows **keybook coverage** (counts with parent vs current import totals) so you can see when step 1 and step 2 should be fully cached.
+
+### Matcher throughput (client + server)
+
+The Contact Company Matcher sends **up to five concurrent** `POST /api/match-companies` requests from the browser (`MATCH_MATCHER_CONCURRENT_HTTP` in [`client/src/constants/companyMatch.ts`](client/src/constants/companyMatch.ts)), each carrying up to 30 unique import strings, which reduces wall time versus strictly serial requests. When that concurrency is greater than 1, the client does **not** use NDJSON step streaming (interleaved streams would break the progress UI). The server may run several model sub-batches in parallel per request (`MATCH_LLM_CONCURRENCY` in `server/.env.example`); many overlapping HTTP calls increase the chance of **429** rate limits—reduce client concurrency or server concurrency if needed.
 
 ## License
 

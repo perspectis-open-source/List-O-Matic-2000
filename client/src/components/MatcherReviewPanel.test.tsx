@@ -83,4 +83,42 @@ describe('MatcherReviewPanel', () => {
     expect(bodyRows).toHaveLength(1)
     expect(within(bodyRows[0]).getByText('Carol')).toBeInTheDocument()
   })
+
+  it('filters grid to contacts whose import company has a valid list match selected', async () => {
+    render(
+      <MatcherReviewPanel
+        canRun
+        running={false}
+        error={null}
+        onDismissError={() => {}}
+        contacts={mockContacts}
+        headers={mockHeaders}
+        companyColumnKey="Company"
+        rows={matcherRows}
+        canonicalNames={['Acme Holdings LLC', 'Globex Partners Inc']}
+        selection={{ 'Acme Inc': 'Acme Holdings LLC', 'Globex Corp': '' }}
+        selectionProvenance={{}}
+        llmProgress={null}
+        httpWaiting={false}
+        runLog={[]}
+        onSelectionChange={() => {}}
+        onRun={() => {}}
+      />,
+    )
+
+    const matchedBtn = screen.getByTestId('matcher-filter-matched-only')
+    expect(matchedBtn).toHaveTextContent('Matched only (2)')
+    fireEvent.click(matchedBtn)
+
+    expect(screen.getByText(/2 of 3 contact rows \(matched only\)/)).toBeInTheDocument()
+
+    const grid = screen.getByRole('grid')
+    await waitFor(() => {
+      expect(grid.getAttribute('aria-rowcount')).not.toBeNull()
+    })
+    const bodyRows = within(grid).getAllByRole('row').filter((r) => r.getAttribute('row-index') != null)
+    expect(bodyRows).toHaveLength(2)
+    expect(within(bodyRows[0]).getByText('Alice')).toBeInTheDocument()
+    expect(within(bodyRows[1]).getByText('Bob')).toBeInTheDocument()
+  })
 })
