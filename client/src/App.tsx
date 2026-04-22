@@ -41,6 +41,7 @@ import DarkModeIcon from '@mui/icons-material/DarkMode'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import SearchIcon from '@mui/icons-material/Search'
 import DownloadIcon from '@mui/icons-material/Download'
+import { coerceTrimmed, isNonEmptyCoercedTrimmed } from '@vendor-shared/lib/strings'
 import { getAppTheme } from './theme'
 import { parseContactFile, parseCompanyFile, type ContactRow, type CompanyRow } from './utils/parseFile'
 import { downloadCsv, sanitizeFilenameSegment } from './utils/exportCsv'
@@ -239,7 +240,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     const set = new Set<string>()
     for (const row of contacts) {
       const v = row[companyColumnKey]
-      if (v != null && String(v).trim() !== '') set.add(String(v).trim())
+      if (isNonEmptyCoercedTrimmed(v)) set.add(coerceTrimmed(v))
     }
     return Array.from(set)
   }, [contacts, companyColumnKey])
