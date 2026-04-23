@@ -286,3 +286,31 @@ export async function persistNewContactParents(newEntries) {
   await fs.writeFile(tmp, body, 'utf8')
   await fs.rename(tmp, file)
 }
+
+/**
+ * Delete persisted parent keybook JSONL files (never touches contact-company-match.jsonl).
+ * @param {{ companyKey?: boolean; contactCompanyKey?: boolean }} selection
+ * @returns {Promise<{ companyKey: boolean; contactCompanyKey: boolean }>} which targets had unlink attempted
+ */
+export async function clearMatcherParentKeybooks(selection) {
+  const sel = selection && typeof selection === 'object' ? selection : {}
+  const company = sel.companyKey === true
+  const contact = sel.contactCompanyKey === true
+  if (!company && !contact) {
+    throw new Error('At least one of companyKey or contactCompanyKey must be true')
+  }
+  const cleared = { companyKey: false, contactCompanyKey: false }
+  if (company) {
+    cleared.companyKey = true
+    await fs.unlink(companyKeyPath()).catch((e) => {
+      if (e.code !== 'ENOENT') throw e
+    })
+  }
+  if (contact) {
+    cleared.contactCompanyKey = true
+    await fs.unlink(contactKeyPath()).catch((e) => {
+      if (e.code !== 'ENOENT') throw e
+    })
+  }
+  return cleared
+}

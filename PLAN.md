@@ -82,6 +82,12 @@ cp .env.example .env
 | PORT | No | Server port (default 3001) |
 | MAX_AGENT_ITERATIONS | No | Max tool-use rounds per request (default 3) |
 | TAVILY_API_KEY | No | Optional; if not set, mock search is used |
+| EVIDENCE_LOG_DIR | No | If set (non-empty), append each LLM call to `{EVIDENCE_LOG_DIR}/list-o-matic-evidence.jsonl` via `@syncsphere/vendor-governance/node` (`createLlmEvidenceRuntimeFromProcessEnv`). If unset, evidence is not persisted. |
+| EVIDENCE_MAX_MESSAGE_CONTENT_CHARS | No | Read by governance: raises the max chars per message body stored in evidence (default 80_000). |
+| EVIDENCE_MAX_MESSAGES_KEPT | No | Read by governance: raises how many chat messages are kept in evidence (default 80). |
+| EVIDENCE_MAX_SERIALIZED_JSON_CHARS | No | Read by governance: raises JSON serialization cap for structured content in evidence (default 200_000). |
+
+**LLM evidence (same pattern for other Node apps):** depend on `@syncsphere/vendor-governance/node`, enable `expressCorrelationMiddleware` if using Express, then `createLlmEvidenceRuntimeFromProcessEnv({ jsonlRelativePath: '<app>-evidence.jsonl', actor: '<id>', logLabel: '...' })` and use returned `withLlmEvidence(step, createParams, (p) => client.chat.completions.create(p))` at each LLM call.
 
 **NPM scripts**
 

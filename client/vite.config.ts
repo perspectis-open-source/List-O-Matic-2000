@@ -23,7 +23,8 @@ export default defineConfig({
   },
   server: {
     fs: {
-      allow: [vendorSharedPackageRoot, vendorSharedSrcRoot],
+      // Custom list replaces Vite defaults — must include this app root (index.html, public/) plus vendor shared.
+      allow: [__dirname, vendorSharedPackageRoot],
     },
     proxy: {
       '/api': { target: 'http://localhost:3001', changeOrigin: true },

@@ -32,6 +32,10 @@ import {
   Menu,
   MenuItem,
   Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -77,6 +81,7 @@ import { canonicalNamesFromCompanies } from './utils/companyMatch'
 import { buildMatchKeyGridRows } from './utils/matcherContactMatchGrid'
 import {
   getMatcherKeybook,
+  clearMatcherParentKeybooks,
   type MatcherKeybookContactMatchRow,
   type MatcherKeybookSnapshot,
 } from './api/matcherKeybook'
@@ -165,6 +170,9 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
   const [matcherParentByRaw, setMatcherParentByRaw] = useState<Record<string, string>>({})
   const [matcherContactMatchRows, setMatcherContactMatchRows] = useState<MatcherKeybookContactMatchRow[]>([])
   const [matcherKeybookSnapshot, setMatcherKeybookSnapshot] = useState<MatcherKeybookSnapshot | null>(null)
+  /** Which parent keybook file the confirm dialog will clear (one at a time). */
+  const [keybookClearTarget, setKeybookClearTarget] = useState<'company' | 'contact' | null>(null)
+  const [keybookClearBusy, setKeybookClearBusy] = useState(false)
   const [contactCompanyMatchMatchedOnly, setContactCompanyMatchMatchedOnly] = useState(false)
   /** In-flight POST /api/match-companies count (matcher uses parallel batches when >1). */
   const matcherHttpInFlightRef = useRef(0)
@@ -533,6 +541,26 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     openMatcherTab()
     void handleRunMatcher()
   }, [openMatcherTab, handleRunMatcher])
+
+  const handleConfirmKeybookClear = useCallback(async () => {
+    if (keybookClearTarget == null) return
+    setMatcherError(null)
+    setKeybookClearBusy(true)
+    try {
+      await clearMatcherParentKeybooks({
+        companyKey: keybookClearTarget === 'company',
+        contactCompanyKey: keybookClearTarget === 'contact',
+      })
+      setKeybookClearTarget(null)
+      const snap = await getMatcherKeybook()
+      setMatcherKeybookSnapshot(snap)
+      setMatcherContactMatchRows(snap.contactCompanyMatch)
+    } catch (e) {
+      setMatcherError(e instanceof Error ? e.message : 'Failed to clear keybook files')
+    } finally {
+      setKeybookClearBusy(false)
+    }
+  }, [keybookClearTarget])
 
   const aiResultsContacts = useMemo(() => {
     if (!companyColumnKey || matchingCompanyNames.length === 0) return []
@@ -903,6 +931,25 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                 >
                   Contact Company Matcher
                 </MenuItem>
+                <Divider component="li" sx={{ my: 0.5 }} />
+                <MenuItem
+                  onClick={() => {
+                    setUploadMenuAnchor(null)
+                    setKeybookClearTarget('company')
+                  }}
+                  data-testid="header-keybook-clear-company-menu"
+                >
+                  Clear Company Key cache…
+                </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    setUploadMenuAnchor(null)
+                    setKeybookClearTarget('contact')
+                  }}
+                  data-testid="header-keybook-clear-contact-menu"
+                >
+                  Clear Contact Company Key cache…
+                </MenuItem>
               </>
             )}
           </Menu>
@@ -920,6 +967,55 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
         onImportContacts={handleContactsFileAccepted}
         onImportCompanies={handleCompanyFileAccepted}
       />
+
+      <Dialog
+        open={keybookClearTarget != null}
+        onClose={() => !keybookClearBusy && setKeybookClearTarget(null)}
+        maxWidth="sm"
+        fullWidth
+        slotProps={{ paper: { 'data-testid': 'header-keybook-clear-dialog' } }}
+      >
+        <DialogTitle>
+          {keybookClearTarget === 'company'
+            ? 'Clear Company Key cache'
+            : keybookClearTarget === 'contact'
+              ? 'Clear Contact Company Key cache'
+              : 'Clear keybook cache'}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {keybookClearTarget === 'company' && (
+              <>
+                This removes <strong>company-key.jsonl</strong> on the server. The next matcher run may call the LLM
+                for step 1 again. Contact Company Key and Contact Company Match files are not changed.
+              </>
+            )}
+            {keybookClearTarget === 'contact' && (
+              <>
+                This removes <strong>contact-company-key.jsonl</strong> on the server. The next matcher run may call the
+                LLM for step 2 again. Company Key and Contact Company Match files are not changed.
+              </>
+            )}
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setKeybookClearTarget(null)} disabled={keybookClearBusy}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            disabled={keybookClearBusy || keybookClearTarget == null}
+            onClick={() => void handleConfirmKeybookClear()}
+          >
+            {keybookClearBusy
+              ? 'Clearing…'
+              : keybookClearTarget === 'company'
+                ? 'Clear Company Key'
+                : 'Clear Contact Company Key'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Container
         maxWidth={false}

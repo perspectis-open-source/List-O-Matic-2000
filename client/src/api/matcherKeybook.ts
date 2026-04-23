@@ -20,6 +20,11 @@ export type MatcherKeybookSnapshot = {
   contactCompanyMatch: MatcherKeybookContactMatchRow[]
 }
 
+export type MatcherParentKeybookClearSelection = {
+  companyKey: boolean
+  contactCompanyKey: boolean
+}
+
 export async function getMatcherKeybook(): Promise<MatcherKeybookSnapshot> {
   const res = await fetch(`${API_BASE}/api/matcher-keybook`)
   if (!res.ok) {
@@ -27,4 +32,27 @@ export async function getMatcherKeybook(): Promise<MatcherKeybookSnapshot> {
     throw new Error(text || `Matcher keybook request failed (${res.status})`)
   }
   return res.json() as Promise<MatcherKeybookSnapshot>
+}
+
+/** Clears `company-key.jsonl` and/or `contact-company-key.jsonl` on the server (never `contact-company-match.jsonl`). */
+export async function clearMatcherParentKeybooks(
+  selection: MatcherParentKeybookClearSelection,
+): Promise<{ ok: boolean; cleared: MatcherParentKeybookClearSelection }> {
+  const res = await fetch(`${API_BASE}/api/matcher-keybook/clear`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(selection),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    let msg = text || `Matcher keybook clear failed (${res.status})`
+    try {
+      const j = JSON.parse(text) as { error?: string }
+      if (j.error) msg = j.error
+    } catch {
+      /* keep msg */
+    }
+    throw new Error(msg)
+  }
+  return res.json() as Promise<{ ok: boolean; cleared: MatcherParentKeybookClearSelection }>
 }

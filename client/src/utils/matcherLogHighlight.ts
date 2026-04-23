@@ -35,16 +35,14 @@ function parseHexColor(hex: string): [number, number, number] {
 
 /**
  * Progressive blue for `Batch i`: light at i=1, lerping to `tokensColor` at i=batchTotal.
- * `tokensColor` is the same hex used for “Tokens this request” (darker blues for contrast on the log).
  */
 export function batchProgressBlue(
   batchIndex: number,
   batchTotal: number,
   tokensColor: string,
-  mode: 'light' | 'dark'
+  mode: 'light' | 'dark',
 ): string {
   const ratio = batchTotal <= 1 ? 0 : (batchIndex - 1) / (batchTotal - 1)
-  /** Darker ramp start than blue-200 so “Batch 1” stays readable on pale log backgrounds. */
   const startHex = mode === 'light' ? '#38bdf8' : '#0ea5e9'
   const start = parseHexColor(startHex)
   const end = parseHexColor(tokensColor)

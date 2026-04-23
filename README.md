@@ -105,6 +105,8 @@ The server reads **`company-key.jsonl`** and **`contact-company-key.jsonl`** (se
 
 **GET `/api/matcher-keybook`** returns sorted arrays for the Company Key, Contact Company Key, and Contact Company Match reference tables (no auth in the demo server). The Contact Company Matcher tab shows **keybook coverage** (counts with parent vs current import totals) so you can see when step 1 and step 2 should be fully cached.
 
+**Clearing parent keybooks from the UI:** the app menu (after uploads) has two entries — **Clear Company Key cache…** and **Clear Contact Company Key cache…** — each confirms then deletes only that JSONL via `POST /api/matcher-keybook/clear` with a single-target body. **`contact-company-match.jsonl` is never removed** by those actions. To remove all matcher JSONL (and legacy snapshots) from disk, use `npm run wipe-matcher-data` in `server/` instead.
+
 ### Matcher throughput (client + server)
 
 The Contact Company Matcher sends **up to five concurrent** `POST /api/match-companies` requests from the browser (`MATCH_MATCHER_CONCURRENT_HTTP` in [`client/src/constants/companyMatch.ts`](client/src/constants/companyMatch.ts)), each carrying up to 30 unique import strings, which reduces wall time versus strictly serial requests. When that concurrency is greater than 1, the client does **not** use NDJSON step streaming (interleaved streams would break the progress UI). The server may run several model sub-batches in parallel per request (`MATCH_LLM_CONCURRENCY` in `server/.env.example`); many overlapping HTTP calls increase the chance of **429** rate limits—reduce client concurrency or server concurrency if needed.

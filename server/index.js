@@ -28,6 +28,10 @@ import { fileURLToPath } from 'node:url'
 import express from 'express'
 import cors from 'cors'
 import OpenAI from 'openai'
+import {
+  createLlmEvidenceRuntimeFromProcessEnv,
+  expressCorrelationMiddleware,
+} from '@syncsphere/vendor-governance/node'
 import { crmRouter } from './crmConnector.js'
 import {
   readCompanyKeybook,
@@ -39,6 +43,7 @@ import {
   getMatcherKeybookSnapshot,
   seedParentByRawFromKeybooks,
   shouldRunMatchFallbackForRaw,
+  clearMatcherParentKeybooks,
 } from './matcherKeybook.js'
 
 const app = express()
@@ -46,9 +51,16 @@ const PORT = process.env.PORT ?? 3001
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:5173'
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 
+const { withLlmEvidence } = createLlmEvidenceRuntimeFromProcessEnv({
+  jsonlRelativePath: 'list-o-matic-evidence.jsonl',
+  actor: 'list-o-matic-2000',
+  logLabel: 'list-o-matic',
+})
+
 app.use(cors({ origin: CORS_ORIGIN }))
 // Match-companies sends ~500 contact + 500 CRM names; allow large JSON bodies (default is 100kb)
 app.use(express.json({ limit: 2 * 1024 * 1024 }))
+app.use(expressCorrelationMiddleware())
 
 // AI Search: unique company names sent to LLM in batches. Revisit if list or token limits grow.
 const BATCH_SIZE = 400
@@ -230,15 +242,19 @@ async function askLLM(openai, batchNames, inputCompanyQuery, refinementContext =
     userPrompt = `REFINEMENT.${scopeLine}\nPrevious matches: ${refinementContext.previousMatchingNames.slice(0, 50).join(', ')}${refinementContext.previousMatchingNames.length > 50 ? '...' : ''}\nUser instruction: ${refinementContext.lastUserContent}\n\nList (copy only from this list):\n${batchNames.join('\n')}`
   }
 
-  const completion = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT_MATCH },
-      { role: 'user', content: userPrompt },
-    ],
-    response_format: { type: 'json_object' },
-    max_tokens: 4000,
-  })
+  const completion = await withLlmEvidence(
+    'normalizer.askLLM',
+    {
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT_MATCH },
+        { role: 'user', content: userPrompt },
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 4000,
+    },
+    (p) => openai.chat.completions.create(p),
+  )
 
   const text = completion.choices?.[0]?.message?.content?.trim()
   const emptyUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
@@ -304,12 +320,16 @@ async function runAgentLoop(openai, batchNames, inputCompanyQuery, refinementCon
   const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
 
   while (iterations < MAX_AGENT_ITERATIONS) {
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages,
-      tools: [SEARCH_WEB_TOOL],
-      max_tokens: 4000,
-    })
+    const completion = await withLlmEvidence(
+      'normalizer.runAgentLoop',
+      {
+        model: 'gpt-4o-mini',
+        messages,
+        tools: [SEARCH_WEB_TOOL],
+        max_tokens: 4000,
+      },
+      (p) => openai.chat.completions.create(p),
+    )
     const u = completion.usage
     if (u) {
       usage.prompt_tokens += u.prompt_tokens ?? 0
@@ -627,18 +647,22 @@ Include one entry per input line. "name" must copy the input line exactly.
 Names (one per line):
 ${listStr}`
 
-  const completion = await openai.chat.completions.create({
-    model: MATCH_COMPANIES_MODEL,
-    messages: [
-      {
-        role: 'system',
-        content: MATCHER_LLM_SYSTEM_PARENT,
-      },
-      { role: 'user', content: userPrompt },
-    ],
-    response_format: { type: 'json_object' },
-    max_tokens: 4000,
-  })
+  const completion = await withLlmEvidence(
+    'matcher.inferParents.canonicalList',
+    {
+      model: MATCH_COMPANIES_MODEL,
+      messages: [
+        {
+          role: 'system',
+          content: MATCHER_LLM_SYSTEM_PARENT,
+        },
+        { role: 'user', content: userPrompt },
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 4000,
+    },
+    (p) => openai.chat.completions.create(p),
+  )
 
   const text = completion.choices?.[0]?.message?.content?.trim()
   const parsed = parseLLMJson(text)
@@ -678,18 +702,22 @@ Every input object must appear exactly once; "raw" must match exactly.
 Items:
 ${itemsDesc}`
 
-  const completion = await openai.chat.completions.create({
-    model: MATCH_COMPANIES_MODEL,
-    messages: [
-      {
-        role: 'system',
-        content: MATCHER_LLM_SYSTEM_PARENT,
-      },
-      { role: 'user', content: userPrompt },
-    ],
-    response_format: { type: 'json_object' },
-    max_tokens: 4000,
-  })
+  const completion = await withLlmEvidence(
+    'matcher.inferParents.contactRaws',
+    {
+      model: MATCH_COMPANIES_MODEL,
+      messages: [
+        {
+          role: 'system',
+          content: MATCHER_LLM_SYSTEM_PARENT,
+        },
+        { role: 'user', content: userPrompt },
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 4000,
+    },
+    (p) => openai.chat.completions.create(p),
+  )
 
   const text = completion.choices?.[0]?.message?.content?.trim()
   const parsed = parseLLMJson(text)
@@ -996,19 +1024,23 @@ async function askMatchCompaniesLLM(openai, canonicalNames, items, canonSet, low
     .join('\n')
   const userPrompt = `Canonical company names from the user's companies file (exact strings). Your "match" MUST be exactly one of these strings or null:\n${listStr}\n\nFor each item, pick the single best canonical row for the raw contact import string, or null if none fit. Use the same mental model as parent-company / brand matching: the import may be a misspelling, shorthand, or a product/consumer brand; infer the intended entity, then choose one list line.\n\nDisambiguation:\n- Product / consumer brands (e.g. beverages): if the list has both a brand-specific line and a clear parent or ultimate operating company line for that brand, prefer the parent as "match" when it is the better rollup. If only the brand line exists in the list, use that line.\n- Fix obvious typos before matching; "match" must be copied exactly from the list.\n- Optional "alternates": other plausible list lines (e.g. brand row when match is parent).\n\nIf topCandidates is non-empty you may use them as hints but may still choose another list name.\n\nItems (one JSON object per line):\n${itemsDesc}\n\nReturn JSON: { "results": [ { "raw": "<exact raw>", "match": "<exact canonical from list or null>", "alternates": [] } ] }\nEvery input raw must appear exactly once in results with the same "raw" string.`
 
-  const completion = await openai.chat.completions.create({
-    model: MATCH_COMPANIES_MODEL,
-    messages: [
-      {
-        role: 'system',
-        content:
-          'You map noisy import strings to one companies-file Name per row (closed list). Infer brands, typos, and parents like the Normalizer would, but output only one "match" per item—exact list string or null. Prefer a parent/ultimate operating company list row over a brand-only row when both exist and parent is the better rollup. Return only valid JSON.',
-      },
-      { role: 'user', content: userPrompt },
-    ],
-    response_format: { type: 'json_object' },
-    max_tokens: 4000,
-  })
+  const completion = await withLlmEvidence(
+    'matcher.askMatchCompanies',
+    {
+      model: MATCH_COMPANIES_MODEL,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You map noisy import strings to one companies-file Name per row (closed list). Infer brands, typos, and parents like the Normalizer would, but output only one "match" per item—exact list string or null. Prefer a parent/ultimate operating company list row over a brand-only row when both exist and parent is the better rollup. Return only valid JSON.',
+        },
+        { role: 'user', content: userPrompt },
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 4000,
+    },
+    (p) => openai.chat.completions.create(p),
+  )
 
   const text = completion.choices?.[0]?.message?.content?.trim()
   const parsed = parseLLMJson(text)
@@ -1037,10 +1069,55 @@ function assembleMatcherChunkResults(items, chunkByRaw) {
   return items.map((it) => chunkByRaw.get(it.raw) ?? { raw: it.raw, match: null, alternates: [] })
 }
 
+/** @param {unknown} body */
+function validateMatcherKeybookClearBody(body) {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, error: 'Body must be a JSON object' }
+  }
+  const o = /** @type {Record<string, unknown>} */ (body)
+  const keys = Object.keys(o)
+  for (const k of keys) {
+    if (k !== 'companyKey' && k !== 'contactCompanyKey') {
+      return { ok: false, error: `Unknown key: ${k}` }
+    }
+  }
+  if (keys.length === 0) {
+    return { ok: false, error: 'Provide companyKey and/or contactCompanyKey booleans' }
+  }
+  if (o.companyKey !== undefined && typeof o.companyKey !== 'boolean') {
+    return { ok: false, error: 'companyKey must be a boolean' }
+  }
+  if (o.contactCompanyKey !== undefined && typeof o.contactCompanyKey !== 'boolean') {
+    return { ok: false, error: 'contactCompanyKey must be a boolean' }
+  }
+  const companyKey = o.companyKey === true
+  const contactCompanyKey = o.contactCompanyKey === true
+  if (!companyKey && !contactCompanyKey) {
+    return { ok: false, error: 'At least one of companyKey or contactCompanyKey must be true' }
+  }
+  return { ok: true, companyKey, contactCompanyKey }
+}
+
 app.get('/api/matcher-keybook', async (_req, res, next) => {
   try {
     const snapshot = await getMatcherKeybookSnapshot()
     res.status(200).json(snapshot)
+  } catch (err) {
+    next(err)
+  }
+})
+
+app.post('/api/matcher-keybook/clear', async (req, res, next) => {
+  try {
+    const validated = validateMatcherKeybookClearBody(req.body)
+    if (!validated.ok) {
+      return res.status(400).json({ error: validated.error })
+    }
+    const cleared = await clearMatcherParentKeybooks({
+      companyKey: validated.companyKey,
+      contactCompanyKey: validated.contactCompanyKey,
+    })
+    res.status(200).json({ ok: true, cleared })
   } catch (err) {
     next(err)
   }
