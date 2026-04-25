@@ -9,23 +9,28 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const vendorSharedPackageRoot = path.resolve(__dirname, '../../shared')
-const vendorSharedSrcRoot = path.join(vendorSharedPackageRoot, 'src')
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
   resolve: {
+    // Single graph for app + linked `@vendor-shared` source (shared’s own node_modules would otherwise load a second React/MUI).
+    dedupe: [
+      'react',
+      'react-dom',
+      '@mui/material',
+      '@mui/system',
+      '@mui/icons-material',
+      '@emotion/react',
+      '@emotion/styled',
+    ],
     alias: {
-      // Must match tsconfig `paths`: `@vendor-shared/*` -> `shared/src/*`
-      '@vendor-shared': vendorSharedSrcRoot,
+      // Keep a single React graph for app and local platform modules.
+      react: path.resolve(__dirname, 'node_modules/react'),
+      'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
     },
   },
   server: {
-    fs: {
-      // Custom list replaces Vite defaults — must include this app root (index.html, public/) plus vendor shared.
-      allow: [__dirname, vendorSharedPackageRoot],
-    },
     proxy: {
       '/api': { target: 'http://localhost:3001', changeOrigin: true },
     },

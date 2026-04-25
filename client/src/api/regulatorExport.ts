@@ -1,8 +1,9 @@
 /**
  * @file regulatorExport.ts
- * @description POST /api/governance/regulator-export — server-side JSON-LD + manifest (no jsonld in browser).
+ * @description POST /api/export/basic-json — standalone-safe JSON export (no governance JSON-LD).
  */
-import type { CanonicalEvidenceRecord } from '@syncsphere/vendor-governance'
+
+export type BasicExportRecord = Record<string, unknown>
 
 const API_BASE = import.meta.env.VITE_API_URL ?? ''
 const SECRET = import.meta.env.VITE_REGULATOR_EXPORT_SECRET ?? ''
@@ -14,14 +15,14 @@ export type RegulatorExportManifest = {
 }
 
 export type RegulatorExportResponse = {
-  evidenceJsonLd: unknown
+  exportJson: unknown
   manifest: RegulatorExportManifest
 }
 
-export async function postRegulatorExport(record: CanonicalEvidenceRecord): Promise<RegulatorExportResponse> {
+export async function postRegulatorExport(record: BasicExportRecord): Promise<RegulatorExportResponse> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (SECRET) headers['x-regulator-export-secret'] = SECRET
-  const res = await fetch(`${API_BASE}/api/governance/regulator-export`, {
+  const res = await fetch(`${API_BASE}/api/export/basic-json`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ evidenceRecord: record }),

@@ -19,6 +19,7 @@ jobs:
       - name: Verify and build OSS export
         run: |
           node scripts/verify-boundaries.mjs
+          npm run verify:imports
           node scripts/verify-oss-export.mjs
 
       - name: Upload OSS export artifact

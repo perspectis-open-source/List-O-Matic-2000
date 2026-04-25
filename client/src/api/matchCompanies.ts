@@ -2,6 +2,7 @@
  * @file matchCompanies.ts
  * @description Client API: POST /api/match-companies — LLM assist for contact company → canonical Name mapping.
  */
+import type { MatchCompaniesUsageTotals, MatcherServerStreamProgress } from '../matcher/matcherStreamTypes'
 import { MATCH_API_BATCH_SIZE } from '../constants/companyMatch'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? ''
@@ -10,17 +11,22 @@ export type MatchCompanyItem = { raw: string; topCandidates: string[] }
 
 export type MatchCompanyResult = { raw: string; match: string | null; alternates?: string[] }
 
-/** Cumulative token counts from the OpenAI Chat Completions API (one HTTP response may include several model calls). */
-export type MatchCompaniesUsageTotals = {
-  promptTokens: number
-  completionTokens: number
-  totalTokens: number
+export type { MatchCompaniesUsageTotals, MatcherServerStreamProgress }
+
+/** Per-phase model sub-batch counts from POST /api/match-companies (one HTTP response). */
+export type MatchCompaniesLlmSubBatchesByPhase = {
+  llmSubBatchesStep1: number
+  llmSubBatchesStep2: number
+  llmSubBatchesFallback: number
 }
 
 export type MatchCompaniesResponse = {
   results: MatchCompanyResult[]
   meta?: {
     llmSubBatches?: number
+    llmSubBatchesStep1?: number
+    llmSubBatchesStep2?: number
+    llmSubBatchesFallback?: number
     usage?: MatchCompaniesUsageTotals
     model?: string
   }
@@ -30,21 +36,13 @@ export type MatchCompaniesResponse = {
   parentByRaw?: Record<string, string>
 }
 
-/** One NDJSON `progress` line from POST /api/match-companies when `streamProgress: true`. */
-export type MatcherServerStreamProgress = {
-  type?: 'progress'
-  phase: 'step1' | 'step2' | 'step3' | 'fallback'
-  completed?: number
-  total?: number
-  cached?: boolean
-  detail?: string
-}
-
 export type MatchCompaniesHttpInfo = {
   batchIndex: number
   batchTotal: number
   itemCount: number
   serverLlmSubBatches?: number
+  /** Step 1 / 2 / fallback sub-batch counts when the server reports them. */
+  serverLlmSubBatchesByPhase?: MatchCompaniesLlmSubBatchesByPhase
   /** OpenAI model id for this HTTP response (if the server reported it). */
   modelThisRequest?: string
   /** Token usage for this HTTP response only (if the server reported it). */
@@ -72,6 +70,12 @@ async function readMatchCompaniesNdjsonStream(
       total?: number
       cached?: boolean
       detail?: string
+      stepName?: string
+      model?: string
+      durationMs?: number
+      usage?: MatchCompaniesUsageTotals
+      callOrdinal?: number
+      correlationId?: string
       results?: MatchCompanyResult[]
       meta?: MatchCompaniesResponse['meta']
       parentByCanon?: Record<string, string>
@@ -85,6 +89,18 @@ async function readMatchCompaniesNdjsonStream(
         total: msg.total,
         cached: msg.cached,
         detail: msg.detail,
+        ...(msg.phase === 'llm_call'
+          ? {
+              stepName: msg.stepName,
+              model: msg.model,
+              durationMs: msg.durationMs,
+              usage: msg.usage,
+              callOrdinal: msg.callOrdinal,
+              ...(typeof msg.correlationId === 'string' && msg.correlationId.trim()
+                ? { correlationId: msg.correlationId.trim() }
+                : {}),
+            }
+          : {}),
       })
     }
     if (msg.type === 'complete') {
@@ -247,11 +263,19 @@ export async function postMatchCompaniesBatched(
     if (addUsage(usageTotals, meta?.usage)) sawAnyUsage = true
     const m = meta?.model?.trim()
     if (m) matcherModel = m
+    const s1 = meta?.llmSubBatchesStep1
+    const s2 = meta?.llmSubBatchesStep2
+    const fb = meta?.llmSubBatchesFallback
+    const hasPhase =
+      typeof s1 === 'number' && typeof s2 === 'number' && typeof fb === 'number'
     options?.onHttpRequestComplete?.({
       batchIndex: b.batchIndex,
       batchTotal: total,
       itemCount: b.chunk.length,
       serverLlmSubBatches: meta?.llmSubBatches,
+      serverLlmSubBatchesByPhase: hasPhase
+        ? { llmSubBatchesStep1: s1, llmSubBatchesStep2: s2, llmSubBatchesFallback: fb }
+        : undefined,
       modelThisRequest: m,
       usageThisRequest: meta?.usage,
     })

@@ -1,6 +1,6 @@
 /**
- * @file matcherLogHighlight.ts
- * @description Parse and color matcher Activity log lines (e.g. Batch i/t prefixes).
+ * @file highlight.ts
+ * @description Parse and color company-match activity lines (e.g. `Batch i/t:` prefixes).
  */
 
 export type ParsedBatchPrefix = {
@@ -11,7 +11,7 @@ export type ParsedBatchPrefix = {
 }
 
 /**
- * Match `Batch 3/6: rest of line` as produced by App.tsx matcher logging.
+ * Match `Batch 3/6: rest of line` as produced by match-companies logging.
  */
 export function parseBatchLinePrefix(rest: string): ParsedBatchPrefix | null {
   const m = rest.match(/^Batch (\d+)\/(\d+): (.*)$/)

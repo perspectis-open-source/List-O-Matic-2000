@@ -17,12 +17,11 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "generate-contacts": "node scripts/generate-contacts.js",
+    "generate-contacts:sparse-500": "node scripts/generate-contacts.js --sparse-500",
     "generate-contacts:legacy": "node scripts/generate-contacts.js --legacy",
     "build-off-list-seed": "node scripts/build-off-list-seed.mjs"
   },
   "dependencies": {
-    "@syncsphere/vendor-governance": "file:../../governance",
-    "@syncsphere/vendor-shared": "file:../../shared",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^7.3.8",

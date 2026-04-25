@@ -20,10 +20,14 @@ export type MatcherKeybookSnapshot = {
   contactCompanyMatch: MatcherKeybookContactMatchRow[]
 }
 
-export type MatcherParentKeybookClearSelection = {
+export type MatcherKeybookClearSelection = {
   companyKey: boolean
   contactCompanyKey: boolean
+  contactCompanyMatch: boolean
 }
+
+/** @deprecated Use `MatcherKeybookClearSelection` */
+export type MatcherParentKeybookClearSelection = MatcherKeybookClearSelection
 
 export async function getMatcherKeybook(): Promise<MatcherKeybookSnapshot> {
   const res = await fetch(`${API_BASE}/api/matcher-keybook`)
@@ -34,10 +38,10 @@ export async function getMatcherKeybook(): Promise<MatcherKeybookSnapshot> {
   return res.json() as Promise<MatcherKeybookSnapshot>
 }
 
-/** Clears `company-key.jsonl` and/or `contact-company-key.jsonl` on the server (never `contact-company-match.jsonl`). */
+/** Clears selected matcher JSONL files on the server (`company-key`, `contact-company-key`, and/or `contact-company-match`). */
 export async function clearMatcherParentKeybooks(
-  selection: MatcherParentKeybookClearSelection,
-): Promise<{ ok: boolean; cleared: MatcherParentKeybookClearSelection }> {
+  selection: MatcherKeybookClearSelection,
+): Promise<{ ok: boolean; cleared: MatcherKeybookClearSelection }> {
   const res = await fetch(`${API_BASE}/api/matcher-keybook/clear`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -54,5 +58,5 @@ export async function clearMatcherParentKeybooks(
     }
     throw new Error(msg)
   }
-  return res.json() as Promise<{ ok: boolean; cleared: MatcherParentKeybookClearSelection }>
+  return res.json() as Promise<{ ok: boolean; cleared: MatcherKeybookClearSelection }>
 }

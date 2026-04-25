@@ -20,6 +20,9 @@ jobs:
       - name: Verify OSS boundaries
         run: node scripts/verify-boundaries.mjs
 
+      - name: Verify import boundaries
+        run: npm run verify:imports
+
       - name: Verify OSS export (dry run)
         run: node scripts/verify-oss-export.mjs
 

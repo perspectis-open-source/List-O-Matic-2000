@@ -63,7 +63,8 @@ describe('MatcherReviewPanel', () => {
         selectionProvenance={{}}
         llmProgress={null}
         httpWaiting={false}
-        runLog={[]}
+        activityLogEntries={[]}
+        buildEvidenceUrl={() => ''}
         onSelectionChange={() => {}}
         onRun={() => {}}
       />,
@@ -100,7 +101,8 @@ describe('MatcherReviewPanel', () => {
         selectionProvenance={{}}
         llmProgress={null}
         httpWaiting={false}
-        runLog={[]}
+        activityLogEntries={[]}
+        buildEvidenceUrl={() => ''}
         onSelectionChange={() => {}}
         onRun={() => {}}
       />,

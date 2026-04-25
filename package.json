@@ -2,6 +2,7 @@
   "name": "list-o-matic-2000-workspace",
   "private": true,
   "scripts": {
+    "verify:imports": "node scripts/verify-import-boundaries.mjs",
     "verify:boundaries": "node scripts/verify-boundaries.mjs",
     "verify:oss-export": "node scripts/verify-oss-export.mjs",
     "test:server": "npm --prefix server test",

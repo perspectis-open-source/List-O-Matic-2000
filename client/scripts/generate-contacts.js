@@ -6,6 +6,7 @@
  * Rows 1–25: canonical names. Rows 26–500: S&P 500 fillers not appearing on any contact Company.
  *
  * Default (sparse list-match): writes public/demo-contacts-5k.csv + public/demo-companies-500.csv
+ * Lite testing (500 contacts, 50 list-matchable = 50 canonicals × 1 variant each, no duplicate match rows): `node scripts/generate-contacts.js --sparse-500` → demo-contacts-500.csv + demo-companies-500-lite.csv.
  * Legacy (25×1000 dense match): `node scripts/generate-contacts.js --legacy` → *-legacy.csv (same column schemas).
  * @module List-O-Matic-2000/client/scripts
  */
@@ -165,13 +166,49 @@ const COMPANIES = [
   },
 ]
 
-/** 25 curated clients × 3 = 75 list-matchable contacts (sparse scenario) */
+/** 25 more canonicals used only for `--sparse-500` (50×1 matchable contacts). */
+const COMPANIES_SPARSE_500_EXTRA = [
+  { id: 'nike', canonicalName: 'Nike Inc.', names: ['Nike', 'Nike USA', 'Nike Corp', 'NIKE Inc'] },
+  { id: 'starbucks', canonicalName: 'Starbucks Corporation', names: ['Starbucks', 'Starbucks Corp', 'Starbucks Coffee'] },
+  { id: 'mcdonalds', canonicalName: "McDonald's Corporation", names: ['McDonalds', "McDonald's Corp", "McDonald's USA"] },
+  { id: 'boeing', canonicalName: 'The Boeing Company', names: ['Boeing', 'Boeing Corp', 'Boeing Co'] },
+  { id: 'jpm', canonicalName: 'JPMorgan Chase & Co.', names: ['JPMorgan', 'JP Morgan Chase', 'JPMorgan Chase'] },
+  { id: 'bofa', canonicalName: 'Bank of America Corporation', names: ['BofA', 'Bank of America', 'Bank of America Corp'] },
+  { id: 'wells', canonicalName: 'Wells Fargo & Company', names: ['Wells Fargo', 'Wells Fargo Corp', 'Wells Fargo Bank'] },
+  { id: 'pfizer', canonicalName: 'Pfizer Inc.', names: ['Pfizer', 'Pfizer Corp', 'Pfizer Ltd'] },
+  { id: 'jnj', canonicalName: 'Johnson & Johnson', names: ['J&J', 'Johnson and Johnson', 'Johnson & Johnson Inc'] },
+  { id: 'merck', canonicalName: 'Merck & Co. Inc.', names: ['Merck', 'Merck Sharp Dohme', 'Merck & Co'] },
+  { id: 'homedepot', canonicalName: 'The Home Depot Inc.', names: ['Home Depot', 'The Home Depot', 'Home Depot USA'] },
+  { id: 'lowes', canonicalName: "Lowe's Companies Inc.", names: ['Lowes', "Lowe's Inc", 'Lowes Companies'] },
+  { id: 'ups', canonicalName: 'United Parcel Service Inc.', names: ['UPS', 'United Parcel Service', 'UPS Inc'] },
+  { id: 'fedex', canonicalName: 'FedEx Corporation', names: ['FedEx', 'Federal Express', 'FedEx Corp'] },
+  { id: 'visa', canonicalName: 'Visa Inc.', names: ['Visa', 'Visa USA', 'Visa Corp'] },
+  { id: 'mastercard', canonicalName: 'Mastercard Incorporated', names: ['Mastercard', 'MasterCard Inc', 'Mastercard Intl'] },
+  { id: 'oracle', canonicalName: 'Oracle Corporation', names: ['Oracle', 'Oracle Corp', 'Oracle USA'] },
+  { id: 'ibm', canonicalName: 'International Business Machines Corporation', names: ['IBM', 'International Business Machines', 'IBM Corp'] },
+  { id: 'intel', canonicalName: 'Intel Corporation', names: ['Intel', 'Intel Corp', 'Intel Inc'] },
+  { id: 'nvidia', canonicalName: 'NVIDIA Corporation', names: ['Nvidia', 'NVIDIA', 'NVIDIA Corp'] },
+  { id: 'meta', canonicalName: 'Meta Platforms Inc.', names: ['Meta', 'Facebook Inc', 'Meta Platforms'] },
+  { id: 'tesla', canonicalName: 'Tesla Inc.', names: ['Tesla', 'Tesla Motors', 'Tesla Corp'] },
+  { id: 'alphabet', canonicalName: 'Alphabet Inc.', names: ['Google LLC', 'Google', 'Alphabet USA'] },
+  { id: 'pg', canonicalName: 'The Procter & Gamble Company', names: ['P&G', 'Procter and Gamble', 'Procter & Gamble Co'] },
+  { id: 'unitedhealth', canonicalName: 'UnitedHealth Group Incorporated', names: ['UnitedHealth', 'United Healthcare', 'UnitedHealth Group'] },
+]
+
+const COMPANIES_SPARSE_500 = [...COMPANIES, ...COMPANIES_SPARSE_500_EXTRA]
+
+/** 25 curated clients × 3 = 75 list-matchable contacts (default sparse scenario) */
 const MATCH_CONTACTS_PER_COMPANY = 3
 const TOTAL_SPARSE_CONTACTS = 5000
-const OFF_LIST_CONTACTS_TOTAL = TOTAL_SPARSE_CONTACTS - 25 * MATCH_CONTACTS_PER_COMPANY
-/** First N filtered seeds; 5×11 + 487×10 = 4,925 off-list rows */
-const OFF_LIST_SEED_COUNT = 492
-const OFF_LIST_ELEVEN_ROW_SEEDS = 5
+/** First N filtered seeds (default sparse): 5×11 + 487×10 = 4,925 off-list rows */
+const OFF_LIST_SEED_COUNT_DEFAULT = 492
+const OFF_LIST_ELEVEN_ROW_SEEDS_DEFAULT = 5
+
+/** Lite preset: 50×1 matchable + 45×10 off-list = 500 contacts */
+const SPARSE_500_TOTAL = 500
+const SPARSE_500_MATCH_PER_COMPANY = 1
+const SPARSE_500_OFF_LIST_SEEDS = 45
+const SPARSE_500_OFF_LIST_ELEVEN_ROW_SEEDS = 0
 /** Legacy scenario: 25 × 1000 contacts, all variants of the 25 canonical clients */
 const LEGACY_CONTACTS_PER_COMPANY = 1000
 const COMPANY_ROWS_TARGET = 500
@@ -434,14 +471,47 @@ function mainLegacyDense() {
   console.log(`[legacy] Filler company rows (S&P 500, not in contacts): ${fillerNames.length}`)
 }
 
-function mainSparseMatch() {
+/**
+ * @param {object} opts
+ * @param {typeof COMPANIES} opts.companiesList
+ * @param {number} opts.matchContactsPerCompany
+ * @param {number} opts.totalContacts
+ * @param {number} opts.offListSeedCount
+ * @param {number} opts.offListElevenRowSeeds
+ * @param {string} opts.contactsFilename
+ * @param {string} opts.companiesFilename
+ * @param {string} [opts.logTag]
+ */
+function runSparseMatch(opts) {
+  const {
+    companiesList,
+    matchContactsPerCompany,
+    totalContacts,
+    offListSeedCount,
+    offListElevenRowSeeds,
+    contactsFilename,
+    companiesFilename,
+    logTag = 'sparse',
+  } = opts
+
+  const canonicalCount = companiesList.length
+  const matchContactsTotal = canonicalCount * matchContactsPerCompany
+  const offListContactsTotal =
+    offListElevenRowSeeds * 11 + (offListSeedCount - offListElevenRowSeeds) * 10
+
+  if (matchContactsTotal + offListContactsTotal !== totalContacts) {
+    throw new Error(
+      `[${logTag}] match (${matchContactsTotal}) + off-list (${offListContactsTotal}) must equal totalContacts (${totalContacts})`,
+    )
+  }
+
   const contactObjects = []
-  const canonicalNames = COMPANIES.map((c) => c.canonicalName)
+  const canonicalNames = companiesList.map((c) => c.canonicalName)
   const matchableVariantStrings = new Set()
 
-  for (const company of COMPANIES) {
+  for (const company of companiesList) {
     const pool = variantPool(company)
-    for (let i = 0; i < MATCH_CONTACTS_PER_COMPANY; i++) {
+    for (let i = 0; i < matchContactsPerCompany; i++) {
       const companyName = pool[i % pool.length]
       matchableVariantStrings.add(companyName)
       const globalIndex = contactObjects.length
@@ -449,9 +519,8 @@ function mainSparseMatch() {
     }
   }
 
-  const matchContactsCount = contactObjects.length
-  if (matchContactsCount !== 25 * MATCH_CONTACTS_PER_COMPANY) {
-    throw new Error(`Expected ${25 * MATCH_CONTACTS_PER_COMPANY} match contacts, got ${matchContactsCount}`)
+  if (contactObjects.length !== matchContactsTotal) {
+    throw new Error(`[${logTag}] Expected ${matchContactsTotal} match contacts, got ${contactObjects.length}`)
   }
 
   const uniqueContactCompaniesAfterMatch = new Set(contactObjects.map((c) => c.Company))
@@ -468,7 +537,7 @@ function mainSparseMatch() {
 
   if (fillerNames.length < needFiller) {
     throw new Error(
-      `Need ${needFiller} filler company names but only ${fillerNames.length} S&P names remain after excluding contact variants. Add more source data in scripts/data.`,
+      `[${logTag}] Need ${needFiller} filler company names but only ${fillerNames.length} S&P names remain after excluding contact variants. Add more source data in scripts/data.`,
     )
   }
 
@@ -480,15 +549,15 @@ function mainSparseMatch() {
   const allSeeds = loadOffListSeedNames()
   const offListSeeds = allSeeds.filter((s) => !reservedNorms.has(normCompanyKey(s)))
   if (offListSeeds.length === 0) throw new Error('No off-list seeds after filtering; check off-list-seed-companies.csv')
-  if (offListSeeds.length < OFF_LIST_SEED_COUNT) {
+  if (offListSeeds.length < offListSeedCount) {
     throw new Error(
-      `Need at least ${OFF_LIST_SEED_COUNT} off-list seeds after filtering, got ${offListSeeds.length}`,
+      `[${logTag}] Need at least ${offListSeedCount} off-list seeds after filtering, got ${offListSeeds.length}`,
     )
   }
 
   let offListWritten = 0
-  for (let gi = 0; gi < OFF_LIST_SEED_COUNT; gi++) {
-    const n = gi < OFF_LIST_ELEVEN_ROW_SEEDS ? 11 : 10
+  for (let gi = 0; gi < offListSeedCount; gi++) {
+    const n = gi < offListElevenRowSeeds ? 11 : 10
     const baseSeed = offListSeeds[gi]
     const companyName = pickFirstOffListCompanyName(baseSeed, gi, reservedNorms)
     if (!companyName) {
@@ -501,11 +570,11 @@ function mainSparseMatch() {
     }
   }
 
-  if (offListWritten !== OFF_LIST_CONTACTS_TOTAL) {
-    throw new Error(`Expected ${OFF_LIST_CONTACTS_TOTAL} off-list contacts, wrote ${offListWritten}`)
+  if (offListWritten !== offListContactsTotal) {
+    throw new Error(`[${logTag}] Expected ${offListContactsTotal} off-list contacts, wrote ${offListWritten}`)
   }
-  if (contactObjects.length !== TOTAL_SPARSE_CONTACTS) {
-    throw new Error(`Expected ${TOTAL_SPARSE_CONTACTS} contacts, got ${contactObjects.length}`)
+  if (contactObjects.length !== totalContacts) {
+    throw new Error(`[${logTag}] Expected ${totalContacts} contacts, got ${contactObjects.length}`)
   }
 
   const uniqueContactCompanies = new Set(contactObjects.map((c) => c.Company))
@@ -522,8 +591,10 @@ function mainSparseMatch() {
   for (const row of contactObjects) {
     if (matchableVariantStrings.has(row.Company)) matchLike++
   }
-  if (matchLike !== 25 * MATCH_CONTACTS_PER_COMPANY) {
-    throw new Error(`Expected exactly ${25 * MATCH_CONTACTS_PER_COMPANY} contacts on matchable variants, got ${matchLike}`)
+  if (matchLike !== matchContactsTotal) {
+    throw new Error(
+      `[${logTag}] Expected exactly ${matchContactsTotal} contacts on matchable variants, got ${matchLike}`,
+    )
   }
 
   const companyObjects = [
@@ -537,23 +608,53 @@ function mainSparseMatch() {
   const outDir = path.join(__dirname, '..', 'public')
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true })
 
-  const contactsPath = path.join(outDir, 'demo-contacts-5k.csv')
-  const companiesPath = path.join(outDir, 'demo-companies-500.csv')
+  const contactsPath = path.join(outDir, contactsFilename)
+  const companiesPath = path.join(outDir, companiesFilename)
 
   fs.writeFileSync(contactsPath, contactsCsv, 'utf8')
   fs.writeFileSync(companiesPath, companiesCsv, 'utf8')
 
-  console.log(`Wrote ${contactObjects.length} contacts to ${contactsPath}`)
-  console.log(`Wrote ${companyObjects.length} companies to ${companiesPath}`)
-  console.log(`List-matchable contacts (variant of 25 canonicals): ${25 * MATCH_CONTACTS_PER_COMPANY}`)
-  console.log(`Off-list contacts: ${OFF_LIST_CONTACTS_TOTAL}`)
-  console.log(`Canonical company rows: ${canonicalNames.length}`)
-  console.log(`Unique Company strings in contacts: ${uniqueContactCompanies.size}`)
-  console.log(`Approx matcher batches @30 unique names: ${Math.ceil(uniqueContactCompanies.size / 30)}`)
-  console.log(`Canonical names also verbatim in contacts (expect 0): ${canonicalAlsoInContacts.length}`)
-  console.log(`Filler company rows (S&P 500, not in contacts): ${fillerNames.length}`)
+  console.log(`[${logTag}] Wrote ${contactObjects.length} contacts to ${contactsPath}`)
+  console.log(`[${logTag}] Wrote ${companyObjects.length} companies to ${companiesPath}`)
+  console.log(
+    `[${logTag}] List-matchable contacts (variants of ${canonicalCount} canonicals × ${matchContactsPerCompany}): ${matchContactsTotal}`,
+  )
+  console.log(`[${logTag}] Off-list contacts: ${offListContactsTotal}`)
+  console.log(`[${logTag}] Canonical company rows: ${canonicalNames.length}`)
+  console.log(`[${logTag}] Unique Company strings in contacts: ${uniqueContactCompanies.size}`)
+  console.log(`[${logTag}] Approx matcher batches @30 unique names: ${Math.ceil(uniqueContactCompanies.size / 30)}`)
+  console.log(`[${logTag}] Canonical names also verbatim in contacts (expect 0): ${canonicalAlsoInContacts.length}`)
+  console.log(`[${logTag}] Filler company rows (S&P 500, not in contacts): ${fillerNames.length}`)
+}
+
+function mainSparseMatch() {
+  runSparseMatch({
+    companiesList: COMPANIES,
+    matchContactsPerCompany: MATCH_CONTACTS_PER_COMPANY,
+    totalContacts: TOTAL_SPARSE_CONTACTS,
+    offListSeedCount: OFF_LIST_SEED_COUNT_DEFAULT,
+    offListElevenRowSeeds: OFF_LIST_ELEVEN_ROW_SEEDS_DEFAULT,
+    contactsFilename: 'demo-contacts-5k.csv',
+    companiesFilename: 'demo-companies-500.csv',
+    logTag: 'sparse-5k',
+  })
+}
+
+function mainSparse500() {
+  runSparseMatch({
+    companiesList: COMPANIES_SPARSE_500,
+    matchContactsPerCompany: SPARSE_500_MATCH_PER_COMPANY,
+    totalContacts: SPARSE_500_TOTAL,
+    offListSeedCount: SPARSE_500_OFF_LIST_SEEDS,
+    offListElevenRowSeeds: SPARSE_500_OFF_LIST_ELEVEN_ROW_SEEDS,
+    contactsFilename: 'demo-contacts-500.csv',
+    companiesFilename: 'demo-companies-500-lite.csv',
+    logTag: 'sparse-500',
+  })
 }
 
 const runLegacy = process.argv.includes('--legacy')
+const runSparse500 = process.argv.includes('--sparse-500')
 if (runLegacy) mainLegacyDense()
+else if (runSparse500) mainSparse500()
 else mainSparseMatch()

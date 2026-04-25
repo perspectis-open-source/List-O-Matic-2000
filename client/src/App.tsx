@@ -45,7 +45,14 @@ import DarkModeIcon from '@mui/icons-material/DarkMode'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import SearchIcon from '@mui/icons-material/Search'
 import DownloadIcon from '@mui/icons-material/Download'
-import { coerceTrimmed, isNonEmptyCoercedTrimmed } from '@vendor-shared/lib/strings'
+import { coerceTrimmed, isNonEmptyCoercedTrimmed } from './platform/local/shared/lib/strings'
+import { buildEvidenceGetUrl } from './platform/local/shared/evidence/buildEvidenceGetUrl'
+import {
+  appendMatcherActivityLogEntry,
+  applyMatcherStreamProgress,
+  logMatcherLlmCallProgress,
+} from './matcher/matcherStreamPreset'
+import type { MatcherActivityLogEntry, MatcherLlmProgress } from './matcher/matcherStreamTypes'
 import { getAppTheme } from './theme'
 import { parseContactFile, parseCompanyFile, type ContactRow, type CompanyRow } from './utils/parseFile'
 import { downloadCsv, sanitizeFilenameSegment } from './utils/exportCsv'
@@ -57,20 +64,20 @@ import { MatchKeyGrid } from './components/MatchKeyGrid'
 import { CompanySelect } from './components/CompanySelect'
 import { postChat } from './api/chat'
 import {
+  postMatchCompanies,
   postMatchCompaniesBatched,
+  type MatchCompaniesHttpInfo,
   type MatchCompaniesUsageTotals,
-  type MatcherServerStreamProgress,
 } from './api/matchCompanies'
 import { CrmExportFeature } from './components/CrmExportFeature'
 import {
   MatcherReviewPanel,
   type MatcherRowModel,
-  type MatcherLlmProgress,
   type MatcherSelectionProvenance,
 } from './components/MatcherReviewPanel'
 import {
   MATCH_MATCHER_CLIENT_BATCH_SIZE,
-  MATCH_MATCHER_CONCURRENT_HTTP,
+  MATCH_MAX_MATCHER_ITEMS,
 } from './constants/companyMatch'
 import {
   estimateOpenAiChatCostUsd,
@@ -83,34 +90,23 @@ import {
   getMatcherKeybook,
   clearMatcherParentKeybooks,
   type MatcherKeybookContactMatchRow,
-  type MatcherKeybookSnapshot,
 } from './api/matcherKeybook'
-import { computeMatcherKeybookCoverage } from './utils/matcherKeybookCoverage'
 
-function applyMatcherStreamProgress(
-  prev: MatcherLlmProgress | null,
-  ev: MatcherServerStreamProgress,
-  fallbackBatchTotal: number
-): MatcherLlmProgress {
-  const base: MatcherLlmProgress = prev ?? { completed: 0, total: fallbackBatchTotal }
-  const server = { ...base.server }
-  if (ev.phase === 'step1') {
-    server.step1 = {
-      completed: ev.completed ?? 0,
-      total: ev.total ?? 1,
-      cached: ev.cached,
-    }
+const API_BASE = import.meta.env.VITE_API_URL ?? ''
+
+function matcherHttpServerSubBatchLogSuffix(
+  info: Pick<MatchCompaniesHttpInfo, 'serverLlmSubBatches' | 'serverLlmSubBatchesByPhase'>,
+): string {
+  if (info.serverLlmSubBatchesByPhase) {
+    const { llmSubBatchesStep1, llmSubBatchesStep2, llmSubBatchesFallback } =
+      info.serverLlmSubBatchesByPhase
+    const total = llmSubBatchesStep1 + llmSubBatchesStep2 + llmSubBatchesFallback
+    return ` Server ran ${total} model sub-batch(es) for this request (canonical company parents, step 1: ${llmSubBatchesStep1}; contact import parents, step 2: ${llmSubBatchesStep2}; closed-list fallback: ${llmSubBatchesFallback}).`
   }
-  if (ev.phase === 'step2') {
-    server.step2 = { completed: ev.completed ?? 0, total: ev.total ?? 1 }
+  if (info.serverLlmSubBatches != null) {
+    return ` Server ran ${info.serverLlmSubBatches} model sub-batch(es) for this request.`
   }
-  if (ev.phase === 'step3') {
-    server.step3 = { done: true, detail: ev.detail }
-  }
-  if (ev.phase === 'fallback') {
-    server.fallback = { completed: ev.completed ?? 0, total: ev.total ?? 1 }
-  }
-  return { completed: base.completed, total: base.total, server }
+  return ''
 }
 
 type TabValue =
@@ -165,17 +161,23 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
   >({})
   const [matcherLlmProgress, setMatcherLlmProgress] = useState<MatcherLlmProgress | null>(null)
   const [matcherHttpWaiting, setMatcherHttpWaiting] = useState(false)
-  const [matcherRunLog, setMatcherRunLog] = useState<string[]>([])
+  const [matcherRunLog, setMatcherRunLog] = useState<MatcherActivityLogEntry[]>([])
   const [matcherParentByCanon, setMatcherParentByCanon] = useState<Record<string, string>>({})
   const [matcherParentByRaw, setMatcherParentByRaw] = useState<Record<string, string>>({})
   const [matcherContactMatchRows, setMatcherContactMatchRows] = useState<MatcherKeybookContactMatchRow[]>([])
-  const [matcherKeybookSnapshot, setMatcherKeybookSnapshot] = useState<MatcherKeybookSnapshot | null>(null)
-  /** Which parent keybook file the confirm dialog will clear (one at a time). */
-  const [keybookClearTarget, setKeybookClearTarget] = useState<'company' | 'contact' | null>(null)
+  /** Which keybook action the confirm dialog will run (one at a time). */
+  const [keybookClearTarget, setKeybookClearTarget] = useState<'company' | 'contact' | 'match' | 'all' | null>(null)
   const [keybookClearBusy, setKeybookClearBusy] = useState(false)
   const [contactCompanyMatchMatchedOnly, setContactCompanyMatchMatchedOnly] = useState(false)
   /** In-flight POST /api/match-companies count (matcher uses parallel batches when >1). */
   const matcherHttpInFlightRef = useRef(0)
+  /** Latest ALS correlation for the current matcher HTTP request (for batch log lines). */
+  const matcherEvidenceCorrelationRef = useRef<string | undefined>(undefined)
+
+  const buildMatcherEvidenceUrl = useCallback(
+    (correlationId: string) => buildEvidenceGetUrl(API_BASE, '/api/matcher-evidence', correlationId),
+    [],
+  )
 
   const handleContactsFileAccepted = useCallback(async (file: File) => {
     setParseError(null)
@@ -296,11 +298,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     [matcherContactMatchRows, companies],
   )
 
-  const matcherKeybookCoverage = useMemo(
-    () => computeMatcherKeybookCoverage(matcherKeybookSnapshot, matcherCanonicalNames, uniqueCompanyNames),
-    [matcherKeybookSnapshot, matcherCanonicalNames, uniqueCompanyNames],
-  )
-
   useEffect(() => {
     if (activeTab !== 'contactCompanyMatch') {
       setContactCompanyMatchMatchedOnly(false)
@@ -312,7 +309,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
         const snap = await getMatcherKeybook()
         if (!cancelled) {
           setMatcherContactMatchRows(snap.contactCompanyMatch)
-          if (workspaceMode === 'matcher') setMatcherKeybookSnapshot(snap)
         }
       } catch {
         if (!cancelled) setMatcherContactMatchRows([])
@@ -340,93 +336,160 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
       const raws = uniqueCompanyNames
       const llmItems = raws.map((raw) => ({ raw, topCandidates: [] as string[] }))
 
-      const pushMatcherLog = (line: string) => {
-        const ts = new Date().toLocaleTimeString(undefined, {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        })
-        setMatcherRunLog((prev) => [...prev.slice(-199), `[${ts}] ${line}`])
+      matcherEvidenceCorrelationRef.current = undefined
+      const pushMatcherLog = (line: string, correlationId?: string) => {
+        appendMatcherActivityLogEntry(
+          setMatcherRunLog,
+          line,
+          correlationId ?? matcherEvidenceCorrelationRef.current,
+        )
       }
 
       const llmByRaw = new Map<string, { match: string | null; alternates?: string[] }>()
       let matcherRunUsageTotals: MatchCompaniesUsageTotals | null = null
       let matcherPricingModel: string | null = null
       if (llmItems.length > 0) {
-        const totalBatches = Math.ceil(llmItems.length / MATCH_MATCHER_CLIENT_BATCH_SIZE)
         pushMatcherLog(
           `Starting model pass: ${llmItems.length} unique import string(s), ${canon.length} canonical name(s).`,
         )
-        pushMatcherLog(
-          `${totalBatches} HTTP batch(es) (max ${MATCH_MATCHER_CLIENT_BATCH_SIZE} strings each); each batch may run several model calls on the server.`,
-        )
-        if (MATCH_MATCHER_CONCURRENT_HTTP > 1) {
+
+        if (llmItems.length <= MATCH_MAX_MATCHER_ITEMS) {
           pushMatcherLog(
-            `Up to ${MATCH_MATCHER_CONCURRENT_HTTP} batches in parallel; per-step NDJSON progress is off during parallel runs.`,
+            `Single server request for all ${llmItems.length} import string(s); company-list parent inference (step 1) runs once per run. NDJSON step progress is on.`,
           )
-        }
-        setMatcherLlmProgress({ completed: 0, total: totalBatches })
-        matcherHttpInFlightRef.current = 0
-        const { results: llmResults, usageTotals, matcherModel, parentByCanon, parentByRaw } =
-          await postMatchCompaniesBatched(
-          canon,
-          llmItems,
-          {
-            clientBatchSize: MATCH_MATCHER_CLIENT_BATCH_SIZE,
-            concurrency: MATCH_MATCHER_CONCURRENT_HTTP,
-            onHttpRequestStart: ({ batchIndex, batchTotal, itemCount }) => {
-              matcherHttpInFlightRef.current += 1
-              setMatcherHttpWaiting(true)
-              pushMatcherLog(`Batch ${batchIndex}/${batchTotal}: sending ${itemCount} string(s)…`)
-            },
-            onHttpRequestComplete: ({
-              batchIndex,
-              batchTotal,
-              itemCount,
-              serverLlmSubBatches,
-              modelThisRequest,
-              usageThisRequest,
-            }) => {
-              matcherHttpInFlightRef.current = Math.max(0, matcherHttpInFlightRef.current - 1)
-              if (matcherHttpInFlightRef.current === 0) {
-                setMatcherHttpWaiting(false)
+          setMatcherLlmProgress({ completed: 0, total: 1 })
+          setMatcherHttpWaiting(true)
+          matcherHttpInFlightRef.current = 1
+          const singleRes = await postMatchCompanies(canon, llmItems, {
+            onStreamProgress: (ev) => {
+              if (ev.phase === 'llm_call' && ev.correlationId) {
+                matcherEvidenceCorrelationRef.current = ev.correlationId
               }
-              const sub =
-                serverLlmSubBatches != null
-                  ? ` Server ran ${serverLlmSubBatches} model sub-batch(es) for this request.`
-                  : ''
-              const modelId = modelThisRequest?.trim() || MATCH_COMPANIES_OPENAI_MODEL
-              let tok = ''
-              if (usageThisRequest != null && usageThisRequest.totalTokens > 0) {
-                const est = estimateOpenAiChatCostUsd(
-                  modelId,
-                  usageThisRequest.promptTokens,
-                  usageThisRequest.completionTokens,
+              logMatcherLlmCallProgress(pushMatcherLog, ev)
+              setMatcherLlmProgress((prev) => applyMatcherStreamProgress(prev, ev, 1))
+            },
+          })
+          matcherHttpInFlightRef.current = 0
+          setMatcherHttpWaiting(false)
+          setMatcherLlmProgress((prev) =>
+            prev
+              ? { ...prev, completed: 1, total: 1 }
+              : { completed: 1, total: 1 },
+          )
+
+          const llmResults = singleRes.results
+          const usage = singleRes.meta?.usage
+          if (usage) matcherRunUsageTotals = { ...usage }
+          matcherPricingModel = singleRes.meta?.model?.trim() ?? null
+
+          const sub = matcherHttpServerSubBatchLogSuffix({
+            serverLlmSubBatches: singleRes.meta?.llmSubBatches,
+            serverLlmSubBatchesByPhase:
+              typeof singleRes.meta?.llmSubBatchesStep1 === 'number' &&
+              typeof singleRes.meta?.llmSubBatchesStep2 === 'number' &&
+              typeof singleRes.meta?.llmSubBatchesFallback === 'number'
+                ? {
+                    llmSubBatchesStep1: singleRes.meta.llmSubBatchesStep1,
+                    llmSubBatchesStep2: singleRes.meta.llmSubBatchesStep2,
+                    llmSubBatchesFallback: singleRes.meta.llmSubBatchesFallback,
+                  }
+                : undefined,
+          })
+          const modelId = matcherPricingModel || MATCH_COMPANIES_OPENAI_MODEL
+          let tok = ''
+          if (usage != null && usage.totalTokens > 0) {
+            const est = estimateOpenAiChatCostUsd(
+              modelId,
+              usage.promptTokens,
+              usage.completionTokens,
+            )
+            const estPart =
+              est != null
+                ? ` Est. ${formatUsdEstimate(est)} (${modelId}; OpenAI standard list prices, approximate).`
+                : ` Cannot estimate USD (no rate table for ${modelId}).`
+            tok = ` Tokens this request: ${usage.totalTokens.toLocaleString()} (in ${usage.promptTokens.toLocaleString()} / out ${usage.completionTokens.toLocaleString()}).${estPart}`
+          }
+          pushMatcherLog(`Matcher request complete.${sub}${tok}`, matcherEvidenceCorrelationRef.current)
+
+          setMatcherParentByCanon(singleRes.parentByCanon ?? {})
+          setMatcherParentByRaw(singleRes.parentByRaw ?? {})
+          for (const r of llmResults) {
+            llmByRaw.set(r.raw, { match: r.match, alternates: r.alternates })
+          }
+          pushMatcherLog('Model pass complete.', matcherEvidenceCorrelationRef.current)
+        } else {
+          const totalBatches = Math.ceil(llmItems.length / MATCH_MATCHER_CLIENT_BATCH_SIZE)
+          pushMatcherLog(
+            `Over ${MATCH_MAX_MATCHER_ITEMS} unique strings — using ${totalBatches} sequential HTTP batch(es) (max ${MATCH_MATCHER_CLIENT_BATCH_SIZE} strings each) so each chunk fits server limits. Step 1 may repeat until the server cache warms; use concurrency 1.`,
+          )
+          setMatcherLlmProgress({ completed: 0, total: totalBatches })
+          matcherHttpInFlightRef.current = 0
+          const { results: llmResults, usageTotals, matcherModel, parentByCanon, parentByRaw } =
+            await postMatchCompaniesBatched(canon, llmItems, {
+              clientBatchSize: MATCH_MATCHER_CLIENT_BATCH_SIZE,
+              concurrency: 1,
+              onHttpRequestStart: ({ batchIndex, batchTotal, itemCount }) => {
+                matcherEvidenceCorrelationRef.current = undefined
+                matcherHttpInFlightRef.current += 1
+                setMatcherHttpWaiting(true)
+                pushMatcherLog(`Batch ${batchIndex}/${batchTotal}: sending ${itemCount} string(s)…`)
+              },
+              onHttpRequestComplete: ({
+                batchIndex,
+                batchTotal,
+                itemCount,
+                serverLlmSubBatches,
+                serverLlmSubBatchesByPhase,
+                modelThisRequest,
+                usageThisRequest,
+              }) => {
+                matcherHttpInFlightRef.current = Math.max(0, matcherHttpInFlightRef.current - 1)
+                if (matcherHttpInFlightRef.current === 0) {
+                  setMatcherHttpWaiting(false)
+                }
+                const sub = matcherHttpServerSubBatchLogSuffix({
+                  serverLlmSubBatches,
+                  serverLlmSubBatchesByPhase,
+                })
+                const modelId = modelThisRequest?.trim() || MATCH_COMPANIES_OPENAI_MODEL
+                let tok = ''
+                if (usageThisRequest != null && usageThisRequest.totalTokens > 0) {
+                  const est = estimateOpenAiChatCostUsd(
+                    modelId,
+                    usageThisRequest.promptTokens,
+                    usageThisRequest.completionTokens,
+                  )
+                  const estPart =
+                    est != null
+                      ? ` Est. ${formatUsdEstimate(est)} (${modelId}; OpenAI standard list prices, approximate).`
+                      : ` Cannot estimate USD (no rate table for ${modelId}).`
+                  tok = ` Tokens this request: ${usageThisRequest.totalTokens.toLocaleString()} (in ${usageThisRequest.promptTokens.toLocaleString()} / out ${usageThisRequest.completionTokens.toLocaleString()}).${estPart}`
+                }
+                pushMatcherLog(
+                  `Batch ${batchIndex}/${batchTotal}: got ${itemCount} result(s).${sub}${tok}`,
+                  matcherEvidenceCorrelationRef.current,
                 )
-                const estPart =
-                  est != null
-                    ? ` Est. ${formatUsdEstimate(est)} (${modelId}; OpenAI standard list prices, approximate).`
-                    : ` Cannot estimate USD (no rate table for ${modelId}).`
-                tok = ` Tokens this request: ${usageThisRequest.totalTokens.toLocaleString()} (in ${usageThisRequest.promptTokens.toLocaleString()} / out ${usageThisRequest.completionTokens.toLocaleString()}).${estPart}`
-              }
-              pushMatcherLog(`Batch ${batchIndex}/${batchTotal}: got ${itemCount} result(s).${sub}${tok}`)
-            },
-            onBatchProgress: (completed, total) => {
-              setMatcherLlmProgress({ completed, total })
-            },
-            onServerStreamProgress: (ev) => {
-              setMatcherLlmProgress((prev) => applyMatcherStreamProgress(prev, ev, totalBatches))
-            },
-          },
-        )
-        matcherRunUsageTotals = usageTotals
-        matcherPricingModel = matcherModel
-        setMatcherParentByCanon(parentByCanon)
-        setMatcherParentByRaw(parentByRaw)
-        for (const r of llmResults) {
-          llmByRaw.set(r.raw, { match: r.match, alternates: r.alternates })
+              },
+              onBatchProgress: (completed, total) => {
+                setMatcherLlmProgress({ completed, total })
+              },
+              onServerStreamProgress: (ev) => {
+                if (ev.phase === 'llm_call' && ev.correlationId) {
+                  matcherEvidenceCorrelationRef.current = ev.correlationId
+                }
+                logMatcherLlmCallProgress(pushMatcherLog, ev)
+                setMatcherLlmProgress((prev) => applyMatcherStreamProgress(prev, ev, totalBatches))
+              },
+            })
+          matcherRunUsageTotals = usageTotals
+          matcherPricingModel = matcherModel
+          setMatcherParentByCanon(parentByCanon)
+          setMatcherParentByRaw(parentByRaw)
+          for (const r of llmResults) {
+            llmByRaw.set(r.raw, { match: r.match, alternates: r.alternates })
+          }
+          pushMatcherLog('Model pass complete.', matcherEvidenceCorrelationRef.current)
         }
-        pushMatcherLog('Model pass complete.')
       } else {
         pushMatcherLog('No unique company strings — skipping model.')
       }
@@ -472,14 +535,15 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
         if (row.source === 'llm' && row.suggested) nLlm++
         else if (!row.suggested) nOpen++
       }
+      const tailCid = matcherEvidenceCorrelationRef.current
       setMatcherRunLog((prev) => {
         const ts = new Date().toLocaleTimeString(undefined, {
           hour: '2-digit',
           minute: '2-digit',
           second: '2-digit',
         })
-        const lines = [
-          `[${ts}] Finished: ${nLlm} from model, ${nOpen} need your pick.`,
+        const next: MatcherActivityLogEntry[] = [
+          { line: `[${ts}] Finished: ${nLlm} from model, ${nOpen} need your pick.`, correlationId: tailCid },
         ]
         if (llmItems.length > 0 && matcherRunUsageTotals != null) {
           const modelForEst = matcherPricingModel?.trim() || MATCH_COMPANIES_OPENAI_MODEL
@@ -492,20 +556,22 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
             runEst != null
               ? ` Est. ${formatUsdEstimate(runEst)} (${modelForEst}; OpenAI standard list prices, approximate).`
               : ` Cannot estimate USD (no rate table for ${modelForEst}).`
-          lines.push(
-            `[${ts}] LLM tokens (entire matcher run): ${matcherRunUsageTotals.totalTokens.toLocaleString()} total — ${matcherRunUsageTotals.promptTokens.toLocaleString()} prompt + ${matcherRunUsageTotals.completionTokens.toLocaleString()} completion.${runEstPart}`,
-          )
+          next.push({
+            line: `[${ts}] LLM tokens (entire matcher run): ${matcherRunUsageTotals.totalTokens.toLocaleString()} total — ${matcherRunUsageTotals.promptTokens.toLocaleString()} prompt + ${matcherRunUsageTotals.completionTokens.toLocaleString()} completion.${runEstPart}`,
+            correlationId: tailCid,
+          })
         } else if (llmItems.length > 0) {
-          lines.push(
-            `[${ts}] LLM token usage was not reported by the server for this run (expect totals after upgrading the API).`,
-          )
+          next.push({
+            line: `[${ts}] LLM token usage was not reported by the server for this run (expect totals after upgrading the API).`,
+            correlationId: tailCid,
+          })
         }
-        return [...prev.slice(-199), ...lines]
+        const merged = [...prev, ...next]
+        return merged.slice(-200)
       })
       try {
         const snap = await getMatcherKeybook()
         setMatcherContactMatchRows(snap.contactCompanyMatch)
-        setMatcherKeybookSnapshot(snap)
       } catch {
         /* keybook GET is optional; matcher already persisted server-side */
       }
@@ -518,7 +584,10 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
           second: '2-digit',
         })
         const msg = e instanceof Error ? e.message : 'Matcher failed'
-        return [...prev.slice(-199), `[${ts}] Error: ${msg}`]
+        return [
+          ...prev.slice(-199),
+          { line: `[${ts}] Error: ${msg}`, correlationId: matcherEvidenceCorrelationRef.current },
+        ]
       })
     } finally {
       matcherHttpInFlightRef.current = 0
@@ -547,13 +616,17 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     setMatcherError(null)
     setKeybookClearBusy(true)
     try {
-      await clearMatcherParentKeybooks({
-        companyKey: keybookClearTarget === 'company',
-        contactCompanyKey: keybookClearTarget === 'contact',
-      })
+      const selection =
+        keybookClearTarget === 'all'
+          ? { companyKey: true, contactCompanyKey: true, contactCompanyMatch: true }
+          : keybookClearTarget === 'company'
+            ? { companyKey: true, contactCompanyKey: false, contactCompanyMatch: false }
+            : keybookClearTarget === 'contact'
+              ? { companyKey: false, contactCompanyKey: true, contactCompanyMatch: false }
+              : { companyKey: false, contactCompanyKey: false, contactCompanyMatch: true }
+      await clearMatcherParentKeybooks(selection)
       setKeybookClearTarget(null)
       const snap = await getMatcherKeybook()
-      setMatcherKeybookSnapshot(snap)
       setMatcherContactMatchRows(snap.contactCompanyMatch)
     } catch (e) {
       setMatcherError(e instanceof Error ? e.message : 'Failed to clear keybook files')
@@ -693,24 +766,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
   const hasContacts = contacts.length > 0
   const hasCompanies = companies.length > 0
 
-  useEffect(() => {
-    if (workspaceMode !== 'matcher' || !hasContacts) {
-      setMatcherKeybookSnapshot(null)
-      return
-    }
-    let cancelled = false
-    ;(async () => {
-      try {
-        const snap = await getMatcherKeybook()
-        if (!cancelled) setMatcherKeybookSnapshot(snap)
-      } catch {
-        if (!cancelled) setMatcherKeybookSnapshot(null)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [workspaceMode, hasContacts, matcherCanonicalNames.length, uniqueCompanyNames.length])
   const showNormalizerActivity = aiSearchLoading || processLogLines.length > 0
 
   useEffect(() => {
@@ -950,6 +1005,24 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                 >
                   Clear Contact Company Key cache…
                 </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    setUploadMenuAnchor(null)
+                    setKeybookClearTarget('match')
+                  }}
+                  data-testid="header-keybook-clear-match-menu"
+                >
+                  Clear Contact Company Match cache…
+                </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    setUploadMenuAnchor(null)
+                    setKeybookClearTarget('all')
+                  }}
+                  data-testid="header-keybook-clear-all-menu"
+                >
+                  Clear all matcher caches…
+                </MenuItem>
               </>
             )}
           </Menu>
@@ -973,27 +1046,46 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
         onClose={() => !keybookClearBusy && setKeybookClearTarget(null)}
         maxWidth="sm"
         fullWidth
-        slotProps={{ paper: { 'data-testid': 'header-keybook-clear-dialog' } }}
       >
-        <DialogTitle>
+        <DialogTitle data-testid="header-keybook-clear-dialog">
           {keybookClearTarget === 'company'
             ? 'Clear Company Key cache'
             : keybookClearTarget === 'contact'
               ? 'Clear Contact Company Key cache'
-              : 'Clear keybook cache'}
+              : keybookClearTarget === 'match'
+                ? 'Clear Contact Company Match cache'
+                : keybookClearTarget === 'all'
+                  ? 'Clear all matcher caches'
+                  : 'Clear keybook cache'}
         </DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             {keybookClearTarget === 'company' && (
               <>
-                This removes <strong>company-key.jsonl</strong> on the server. The next matcher run may call the LLM
-                for step 1 again. Contact Company Key and Contact Company Match files are not changed.
+                This removes <strong>company-key.jsonl</strong> on the server and drops the in-memory step 1 parent
+                cache. The next matcher run can call the LLM for step 1 again for names not in other keybooks. Contact
+                Company Key and Contact Company Match files are not changed.
               </>
             )}
             {keybookClearTarget === 'contact' && (
               <>
                 This removes <strong>contact-company-key.jsonl</strong> on the server. The next matcher run may call the
                 LLM for step 2 again. Company Key and Contact Company Match files are not changed.
+              </>
+            )}
+            {keybookClearTarget === 'match' && (
+              <>
+                This removes <strong>contact-company-match.jsonl</strong> on the server. Stored closed-list matches are
+                no longer replayed, so the matcher can run the fallback LLM again where applicable. Parent keybooks are
+                not changed.
+              </>
+            )}
+            {keybookClearTarget === 'all' && (
+              <>
+                This removes all three JSONL files on the server: <strong>company-key.jsonl</strong>,{' '}
+                <strong>contact-company-key.jsonl</strong>, and <strong>contact-company-match.jsonl</strong>, and clears
+                the in-memory step 1 parent cache. The next matcher run should perform the full LLM cycle (steps 1–2
+                and any needed fallback batches).
               </>
             )}
           </Typography>
@@ -1012,7 +1104,11 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
               ? 'Clearing…'
               : keybookClearTarget === 'company'
                 ? 'Clear Company Key'
-                : 'Clear Contact Company Key'}
+                : keybookClearTarget === 'contact'
+                  ? 'Clear Contact Company Key'
+                  : keybookClearTarget === 'match'
+                    ? 'Clear Contact Company Match'
+                    : 'Clear all'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1802,21 +1898,6 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
 
             {activeTab === 'matcher' && (
               <Box sx={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                {matcherKeybookCoverage != null && (
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ flexShrink: 0, mb: 0.5 }}
-                    data-testid="matcher-keybook-coverage"
-                  >
-                    Keybook coverage — Company Key: {matcherKeybookCoverage.companyKeyWithParent.toLocaleString()} /{' '}
-                    {matcherKeybookCoverage.companyKeyTotal.toLocaleString()} names with parent. Contact Company Key:{' '}
-                    {matcherKeybookCoverage.contactKeyWithParent.toLocaleString()} /{' '}
-                    {matcherKeybookCoverage.contactKeyTotal.toLocaleString()} import strings with parent. When both
-                    fractions are full, the matcher skips step 1 and step 2 LLM parent passes (step 3 + optional
-                    fallback may still run).
-                  </Typography>
-                )}
                 <MatcherReviewPanel
                   canRun={matcherCanRun}
                   running={matcherRunning}
@@ -1831,7 +1912,8 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                   selectionProvenance={matcherSelectionProvenance}
                   llmProgress={matcherLlmProgress}
                   httpWaiting={matcherHttpWaiting}
-                  runLog={matcherRunLog}
+                  activityLogEntries={matcherRunLog}
+                  buildEvidenceUrl={buildMatcherEvidenceUrl}
                   matcherParentByRaw={matcherParentByRaw}
                   matcherParentByCanon={matcherParentByCanon}
                   onSelectionChange={handleMatcherSelectionChange}

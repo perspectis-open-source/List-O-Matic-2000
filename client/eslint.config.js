@@ -24,5 +24,18 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@vendor-shared/*', '@syncsphere/vendor-governance*'],
+              message: 'Import through local platform boundary modules only.',
+            },
+          ],
+        },
+      ],
+    },
   },
 ])

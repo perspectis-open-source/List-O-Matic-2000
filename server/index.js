@@ -28,10 +28,7 @@ import { fileURLToPath } from 'node:url'
 import express from 'express'
 import cors from 'cors'
 import OpenAI from 'openai'
-import {
-  createLlmEvidenceRuntimeFromProcessEnv,
-  expressCorrelationMiddleware,
-} from '@syncsphere/vendor-governance/node'
+import { createPlatformRuntime } from './platform/runtime.js'
 import { crmRouter } from './crmConnector.js'
 import {
   readCompanyKeybook,
@@ -50,17 +47,38 @@ const app = express()
 const PORT = process.env.PORT ?? 3001
 const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:5173'
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
-
-const { withLlmEvidence } = createLlmEvidenceRuntimeFromProcessEnv({
-  jsonlRelativePath: 'list-o-matic-evidence.jsonl',
-  actor: 'list-o-matic-2000',
-  logLabel: 'list-o-matic',
-})
+const platform = await createPlatformRuntime(process.env)
+const { withLlmEvidence, getCorrelationIdFromStore } = platform
 
 app.use(cors({ origin: CORS_ORIGIN }))
 // Match-companies sends ~500 contact + 500 CRM names; allow large JSON bodies (default is 100kb)
 app.use(express.json({ limit: 2 * 1024 * 1024 }))
-app.use(expressCorrelationMiddleware())
+app.use(platform.expressCorrelationMiddleware())
+platform.registerOperationalRoutes(app)
+
+app.get('/api/platform-capabilities', (_req, res) => {
+  res.status(200).json({
+    mode: platform.mode,
+    capabilities: platform.capabilities,
+  })
+})
+
+app.post('/api/export/basic-json', (req, res) => {
+  const evidenceRecord = req.body?.evidenceRecord
+  if (!evidenceRecord || typeof evidenceRecord !== 'object') {
+    return res.status(400).json({ error: 'evidenceRecord object is required' })
+  }
+  const serialized = JSON.stringify(evidenceRecord)
+  const sha256 = crypto.createHash('sha256').update(serialized).digest('hex')
+  return res.status(200).json({
+    exportJson: evidenceRecord,
+    manifest: {
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      artifacts: [{ path: 'export/basic-export.json', sha256 }],
+    },
+  })
+})
 
 // AI Search: unique company names sent to LLM in batches. Revisit if list or token limits grow.
 const BATCH_SIZE = 400
@@ -497,7 +515,8 @@ app.post('/api/chat', async (req, res, next) => {
 })
 
 const MATCH_MAX_CANONICAL = 2500
-const MATCH_MAX_ITEMS_PER_REQUEST = 200
+/** Max unique contact import strings per POST (aligned with canonical cap; one run = one step-1 pass). */
+const MATCH_MAX_ITEMS_PER_REQUEST = MATCH_MAX_CANONICAL
 /** Max import strings per single matcher LLM call (balance cost vs. payload size). */
 const MATCH_LLM_BATCH = 50
 /**
@@ -510,6 +529,10 @@ const MATCH_LLM_CONCURRENCY = Math.min(
 )
 /** Chat model for /api/match-companies (client uses this for cost estimates). */
 const MATCH_COMPANIES_MODEL = 'gpt-4o-mini'
+/** Set to 1/true/yes to skip closed-list fallback LLM after step 3 (steps 1–2 unchanged). */
+const MATCHER_DISABLE_LLM_FALLBACK = /^1|true|yes$/i.test(
+  String(process.env.MATCHER_DISABLE_LLM_FALLBACK ?? '').trim(),
+)
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -647,6 +670,7 @@ Include one entry per input line. "name" must copy the input line exactly.
 Names (one per line):
 ${listStr}`
 
+  const t0 = performance.now()
   const completion = await withLlmEvidence(
     'matcher.inferParents.canonicalList',
     {
@@ -663,6 +687,7 @@ ${listStr}`
     },
     (p) => openai.chat.completions.create(p),
   )
+  const durationMs = Math.round(performance.now() - t0)
 
   const text = completion.choices?.[0]?.message?.content?.trim()
   const parsed = parseLLMJson(text)
@@ -684,7 +709,7 @@ ${listStr}`
         total_tokens: u.total_tokens ?? 0,
       }
     : null
-  return { parentByCanon, usage }
+  return { parentByCanon, usage, durationMs }
 }
 
 async function inferParentsForContactRawsBatch(openai, itemsBatch) {
@@ -702,6 +727,7 @@ Every input object must appear exactly once; "raw" must match exactly.
 Items:
 ${itemsDesc}`
 
+  const t0 = performance.now()
   const completion = await withLlmEvidence(
     'matcher.inferParents.contactRaws',
     {
@@ -718,6 +744,7 @@ ${itemsDesc}`
     },
     (p) => openai.chat.completions.create(p),
   )
+  const durationMs = Math.round(performance.now() - t0)
 
   const text = completion.choices?.[0]?.message?.content?.trim()
   const parsed = parseLLMJson(text)
@@ -739,7 +766,7 @@ ${itemsDesc}`
         total_tokens: u.total_tokens ?? 0,
       }
     : null
-  return { parentByRaw, usage }
+  return { parentByRaw, usage, durationMs }
 }
 
 /**
@@ -747,7 +774,7 @@ ${itemsDesc}`
  * @param {Map<string, string> | null} keybookParentByCanon name → parent from JSONL keybook
  * @param {Map<string, string> | null} keybookParentByRaw raw → parent from JSONL keybook
  * @param {Map<string, { match: string | null, parentCompany: string }> | null} keybookMatchByRaw persisted raw → match + parent (replay before fallback)
- * @param {(ev: { type: 'progress', phase: string, completed?: number, total?: number, cached?: boolean, detail?: string }) => void} [progressSink]
+ * @param {(ev: { type: 'progress', phase: string, completed?: number, total?: number, cached?: boolean, detail?: string, stepName?: string, model?: string, durationMs?: number, usage?: { promptTokens: number, completionTokens: number, totalTokens: number }, callOrdinal?: number }) => void} [progressSink]
  */
 async function runThreeStepMatchCompaniesWithSeed(
   openai,
@@ -770,6 +797,31 @@ async function runThreeStepMatchCompaniesWithSeed(
 
   function emitProgress(ev) {
     progressSink?.({ type: 'progress', ...ev })
+  }
+
+  let llmCallOrdinal = 0
+  function emitLlmCallProgress(stepName, durationMs, usage) {
+    if (!progressSink) return
+    llmCallOrdinal += 1
+    let usageOut
+    if (usage && typeof usage === 'object') {
+      usageOut = {
+        promptTokens: usage.prompt_tokens ?? 0,
+        completionTokens: usage.completion_tokens ?? 0,
+        totalTokens: usage.total_tokens ?? 0,
+      }
+    }
+    const correlationId = getCorrelationIdFromStore()
+    progressSink({
+      type: 'progress',
+      phase: 'llm_call',
+      stepName,
+      model: MATCH_COMPANIES_MODEL,
+      durationMs,
+      ...(usageOut ? { usage: usageOut } : {}),
+      callOrdinal: llmCallOrdinal,
+      ...(typeof correlationId === 'string' && correlationId.trim() ? { correlationId: correlationId.trim() } : {}),
+    })
   }
 
   /** @type {Map<string, string>} */
@@ -828,9 +880,10 @@ async function runThreeStepMatchCompaniesWithSeed(
         emitProgress({ phase: 'step1', completed: done, total: tot, cached: false })
       },
     )
-    for (const { parentByCanon: chunk, usage } of parts) {
+    for (const { parentByCanon: chunk, usage, durationMs } of parts) {
       accumulateMatcherUsage(local, usage)
       batches += 1
+      emitLlmCallProgress('matcher.inferParents.canonicalList', durationMs ?? 0, usage)
       for (const [k, v] of chunk) parentByCanon.set(k, v)
     }
     return { local, batches }
@@ -854,9 +907,10 @@ async function runThreeStepMatchCompaniesWithSeed(
         emitProgress({ phase: 'step2', completed: done, total: tot })
       },
     )
-    for (const { parentByRaw: chunk, usage } of parts) {
+    for (const { parentByRaw: chunk, usage, durationMs } of parts) {
       accumulateMatcherUsage(local, usage)
       batches += 1
+      emitLlmCallProgress('matcher.inferParents.contactRaws', durationMs ?? 0, usage)
       for (const [k, v] of chunk) parentByRaw.set(k, v)
     }
     return { local, batches }
@@ -865,7 +919,9 @@ async function runThreeStepMatchCompaniesWithSeed(
   const [s1, s2] = await Promise.all([runStep1Batches(canonNeedLlm), runStep2Batches(rawNeedLlm)])
   mergeMatcherUsageTotals(usageTotals, s1.local)
   mergeMatcherUsageTotals(usageTotals, s2.local)
-  llmSubBatches += s1.batches + s2.batches
+  const llmSubBatchesStep1 = s1.batches
+  const llmSubBatchesStep2 = s2.batches
+  llmSubBatches += llmSubBatchesStep1 + llmSubBatchesStep2
 
   parentCacheSet(fp, parentByCanon)
 
@@ -897,22 +953,27 @@ async function runThreeStepMatchCompaniesWithSeed(
     byRaw.set(it.raw, { raw: it.raw, match: m, alternates: [] })
   }
 
-  const needFallback = items.filter((it) => shouldRunMatchFallbackForRaw(it.raw, byRaw, parentByRaw, keyMatch))
-  const fallbackChunks = batched(needFallback, MATCH_LLM_BATCH).filter((b) => b.length > 0)
-  if (fallbackChunks.length > 0) {
-    emitProgress({ phase: 'fallback', completed: 0, total: fallbackChunks.length })
-    const fbParts = await parallelMapLimit(
-      fallbackChunks,
-      MATCH_LLM_CONCURRENCY,
-      (batch) => askMatchCompaniesLLM(openai, canonicalNames, batch, canonSet, lowerToCanon),
-      (done, tot) => {
-        emitProgress({ phase: 'fallback', completed: done, total: tot })
-      },
-    )
-    for (const { results: part, usage } of fbParts) {
-      accumulateMatcherUsage(usageTotals, usage)
-      llmSubBatches += 1
-      for (const r of part) byRaw.set(r.raw, r)
+  let llmSubBatchesFallback = 0
+  if (!MATCHER_DISABLE_LLM_FALLBACK) {
+    const needFallback = items.filter((it) => shouldRunMatchFallbackForRaw(it.raw, byRaw, parentByRaw, keyMatch))
+    const fallbackChunks = batched(needFallback, MATCH_LLM_BATCH).filter((b) => b.length > 0)
+    if (fallbackChunks.length > 0) {
+      emitProgress({ phase: 'fallback', completed: 0, total: fallbackChunks.length })
+      const fbParts = await parallelMapLimit(
+        fallbackChunks,
+        MATCH_LLM_CONCURRENCY,
+        (batch) => askMatchCompaniesLLM(openai, canonicalNames, batch, canonSet, lowerToCanon),
+        (done, tot) => {
+          emitProgress({ phase: 'fallback', completed: done, total: tot })
+        },
+      )
+      llmSubBatchesFallback = fbParts.length
+      for (const { results: part, usage, durationMs } of fbParts) {
+        accumulateMatcherUsage(usageTotals, usage)
+        llmSubBatches += 1
+        emitLlmCallProgress('matcher.askMatchCompanies', durationMs ?? 0, usage)
+        for (const r of part) byRaw.set(r.raw, r)
+      }
     }
   }
 
@@ -933,6 +994,9 @@ async function runThreeStepMatchCompaniesWithSeed(
     results,
     usageTotals,
     llmSubBatches,
+    llmSubBatchesStep1,
+    llmSubBatchesStep2,
+    llmSubBatchesFallback,
     parentByCanon,
     parentByRaw,
     keybookNewCanon,
@@ -1024,6 +1088,7 @@ async function askMatchCompaniesLLM(openai, canonicalNames, items, canonSet, low
     .join('\n')
   const userPrompt = `Canonical company names from the user's companies file (exact strings). Your "match" MUST be exactly one of these strings or null:\n${listStr}\n\nFor each item, pick the single best canonical row for the raw contact import string, or null if none fit. Use the same mental model as parent-company / brand matching: the import may be a misspelling, shorthand, or a product/consumer brand; infer the intended entity, then choose one list line.\n\nDisambiguation:\n- Product / consumer brands (e.g. beverages): if the list has both a brand-specific line and a clear parent or ultimate operating company line for that brand, prefer the parent as "match" when it is the better rollup. If only the brand line exists in the list, use that line.\n- Fix obvious typos before matching; "match" must be copied exactly from the list.\n- Optional "alternates": other plausible list lines (e.g. brand row when match is parent).\n\nIf topCandidates is non-empty you may use them as hints but may still choose another list name.\n\nItems (one JSON object per line):\n${itemsDesc}\n\nReturn JSON: { "results": [ { "raw": "<exact raw>", "match": "<exact canonical from list or null>", "alternates": [] } ] }\nEvery input raw must appear exactly once in results with the same "raw" string.`
 
+  const t0 = performance.now()
   const completion = await withLlmEvidence(
     'matcher.askMatchCompanies',
     {
@@ -1041,6 +1106,7 @@ async function askMatchCompaniesLLM(openai, canonicalNames, items, canonSet, low
     },
     (p) => openai.chat.completions.create(p),
   )
+  const durationMs = Math.round(performance.now() - t0)
 
   const text = completion.choices?.[0]?.message?.content?.trim()
   const parsed = parseLLMJson(text)
@@ -1054,13 +1120,26 @@ async function askMatchCompaniesLLM(openai, canonicalNames, items, canonSet, low
         total_tokens: u.total_tokens ?? 0,
       }
     : null
-  return { results, usage }
+  return { results, usage, durationMs }
 }
 
-function matchCompaniesMeta(llmSubBatches, usageTotals) {
+function matchCompaniesMeta(llmSubBatches, usageTotals, phaseBatches) {
+  const phases =
+    phaseBatches && typeof phaseBatches === 'object'
+      ? {
+          llmSubBatchesStep1: phaseBatches.step1 ?? 0,
+          llmSubBatchesStep2: phaseBatches.step2 ?? 0,
+          llmSubBatchesFallback: phaseBatches.fallback ?? 0,
+        }
+      : {
+          llmSubBatchesStep1: 0,
+          llmSubBatchesStep2: 0,
+          llmSubBatchesFallback: 0,
+        }
   return {
     model: MATCH_COMPANIES_MODEL,
     llmSubBatches,
+    ...phases,
     usage: usageTotals,
   }
 }
@@ -1077,12 +1156,12 @@ function validateMatcherKeybookClearBody(body) {
   const o = /** @type {Record<string, unknown>} */ (body)
   const keys = Object.keys(o)
   for (const k of keys) {
-    if (k !== 'companyKey' && k !== 'contactCompanyKey') {
+    if (k !== 'companyKey' && k !== 'contactCompanyKey' && k !== 'contactCompanyMatch') {
       return { ok: false, error: `Unknown key: ${k}` }
     }
   }
   if (keys.length === 0) {
-    return { ok: false, error: 'Provide companyKey and/or contactCompanyKey booleans' }
+    return { ok: false, error: 'Provide companyKey, contactCompanyKey, and/or contactCompanyMatch booleans' }
   }
   if (o.companyKey !== undefined && typeof o.companyKey !== 'boolean') {
     return { ok: false, error: 'companyKey must be a boolean' }
@@ -1090,12 +1169,16 @@ function validateMatcherKeybookClearBody(body) {
   if (o.contactCompanyKey !== undefined && typeof o.contactCompanyKey !== 'boolean') {
     return { ok: false, error: 'contactCompanyKey must be a boolean' }
   }
+  if (o.contactCompanyMatch !== undefined && typeof o.contactCompanyMatch !== 'boolean') {
+    return { ok: false, error: 'contactCompanyMatch must be a boolean' }
+  }
   const companyKey = o.companyKey === true
   const contactCompanyKey = o.contactCompanyKey === true
-  if (!companyKey && !contactCompanyKey) {
-    return { ok: false, error: 'At least one of companyKey or contactCompanyKey must be true' }
+  const contactCompanyMatch = o.contactCompanyMatch === true
+  if (!companyKey && !contactCompanyKey && !contactCompanyMatch) {
+    return { ok: false, error: 'At least one of companyKey, contactCompanyKey, or contactCompanyMatch must be true' }
   }
-  return { ok: true, companyKey, contactCompanyKey }
+  return { ok: true, companyKey, contactCompanyKey, contactCompanyMatch }
 }
 
 app.get('/api/matcher-keybook', async (_req, res, next) => {
@@ -1116,7 +1199,11 @@ app.post('/api/matcher-keybook/clear', async (req, res, next) => {
     const cleared = await clearMatcherParentKeybooks({
       companyKey: validated.companyKey,
       contactCompanyKey: validated.contactCompanyKey,
+      contactCompanyMatch: validated.contactCompanyMatch,
     })
+    if (validated.companyKey) {
+      parentByCanonCache.clear()
+    }
     res.status(200).json({ ok: true, cleared })
   } catch (err) {
     next(err)
@@ -1192,6 +1279,9 @@ app.post('/api/match-companies', async (req, res, next) => {
           results: chunkResults,
           usageTotals,
           llmSubBatches,
+          llmSubBatchesStep1,
+          llmSubBatchesStep2,
+          llmSubBatchesFallback,
           parentByCanon,
           parentByRaw,
           keybookNewCanon,
@@ -1208,7 +1298,11 @@ app.post('/api/match-companies', async (req, res, next) => {
         } catch (kbErr) {
           console.warn('[POST /api/match-companies] matcher keybook persist failed', kbErr?.message || kbErr)
         }
-        const metaOut = matchCompaniesMeta(llmSubBatches, usageTotals)
+        const metaOut = matchCompaniesMeta(llmSubBatches, usageTotals, {
+          step1: llmSubBatchesStep1,
+          step2: llmSubBatchesStep2,
+          fallback: llmSubBatchesFallback,
+        })
         const sortedCanon = [...canonicalNames].sort((a, b) => a.localeCompare(b))
         const parentByCanonPayload = parentByCanonMapToSortedObject(parentByCanon, sortedCanon)
         const parentByRawPayload = parentByRawObjectForItemsWithKeybook(parentByRaw, items, keybookContact)
@@ -1245,6 +1339,9 @@ app.post('/api/match-companies', async (req, res, next) => {
       results: chunkResults,
       usageTotals,
       llmSubBatches,
+      llmSubBatchesStep1,
+      llmSubBatchesStep2,
+      llmSubBatchesFallback,
       parentByCanon,
       parentByRaw,
       keybookNewCanon,
@@ -1269,7 +1366,11 @@ app.post('/api/match-companies', async (req, res, next) => {
     })
     return res.status(200).json({
       results: allResults,
-      meta: matchCompaniesMeta(llmSubBatches, usageTotals),
+      meta: matchCompaniesMeta(llmSubBatches, usageTotals, {
+        step1: llmSubBatchesStep1,
+        step2: llmSubBatchesStep2,
+        fallback: llmSubBatchesFallback,
+      }),
       parentByCanon: parentByCanonPayloadJson,
       parentByRaw: parentByRawPayloadJson,
     })

@@ -61,8 +61,21 @@ Cloud is developed from a shared-core architecture, but **cloud billing internal
 Boundary tooling:
 
 - `npm run verify:boundaries`
+- `npm run verify:imports`
 - `npm run verify:oss-export`
 - See [`BOUNDARIES.md`](./BOUNDARIES.md) for policy details.
+
+Import-boundary checks are enforced in GitHub Actions CI (push + pull_request) and must pass for PRs.
+
+### Local pre-PR checklist
+
+Run these before opening a PR:
+
+```bash
+npm run verify:imports
+npm run test:client
+npm run test:server
+```
 
 Mirror automation:
 
@@ -94,6 +107,7 @@ Upload via **Import contacts** / **Import companies** on the start screen.
 | `CORS_ORIGIN`    | Frontend origin (e.g. http://localhost:5173) |
 | `PORT`           | Server port (e.g. 3001)              |
 | `MATCHER_KEYBOOK_DIR` | Optional. Directory for matcher **JSONL keybooks** (`company-key.jsonl`, `contact-company-key.jsonl`, `contact-company-match.jsonl`) used by `POST /api/match-companies` to seed parents and matches and to append new rows after successful runs. Default: `server/data/matcher-keybook/`. |
+| `MATCHER_DISABLE_LLM_FALLBACK` | Optional. Set to `1`, `true`, or `yes` to **skip** the closed-list **fallback** LLM after step 3. Steps 1–2 (parent inference) are unchanged; raws that only matched via fallback get `match: null` unless keybook replay or step 3 alignment supplies a match. |
 
 ### Matcher JSONL keybook
 
@@ -105,11 +119,11 @@ The server reads **`company-key.jsonl`** and **`contact-company-key.jsonl`** (se
 
 **GET `/api/matcher-keybook`** returns sorted arrays for the Company Key, Contact Company Key, and Contact Company Match reference tables (no auth in the demo server). The Contact Company Matcher tab shows **keybook coverage** (counts with parent vs current import totals) so you can see when step 1 and step 2 should be fully cached.
 
-**Clearing parent keybooks from the UI:** the app menu (after uploads) has two entries — **Clear Company Key cache…** and **Clear Contact Company Key cache…** — each confirms then deletes only that JSONL via `POST /api/matcher-keybook/clear` with a single-target body. **`contact-company-match.jsonl` is never removed** by those actions. To remove all matcher JSONL (and legacy snapshots) from disk, use `npm run wipe-matcher-data` in `server/` instead.
+**Clearing keybooks from the UI:** the app menu (after uploads) can clear `company-key.jsonl`, `contact-company-key.jsonl`, and/or `contact-company-match.jsonl` via `POST /api/matcher-keybook/clear` (booleans `companyKey`, `contactCompanyKey`, `contactCompanyMatch`). **Clear all matcher caches** removes all three and clears the server’s in-memory step 1 parent LRU. Clearing only the Company Key file also clears that LRU. For matcher JSONL plus legacy snapshots in one shot, use `npm run wipe-matcher-data` in `server/` instead.
 
 ### Matcher throughput (client + server)
 
-The Contact Company Matcher sends **up to five concurrent** `POST /api/match-companies` requests from the browser (`MATCH_MATCHER_CONCURRENT_HTTP` in [`client/src/constants/companyMatch.ts`](client/src/constants/companyMatch.ts)), each carrying up to 30 unique import strings, which reduces wall time versus strictly serial requests. When that concurrency is greater than 1, the client does **not** use NDJSON step streaming (interleaved streams would break the progress UI). The server may run several model sub-batches in parallel per request (`MATCH_LLM_CONCURRENCY` in `server/.env.example`); many overlapping HTTP calls increase the chance of **429** rate limits—reduce client concurrency or server concurrency if needed.
+For up to **`MATCH_MAX_MATCHER_ITEMS` (2500)** unique import strings (see [`client/src/constants/companyMatch.ts`](client/src/constants/companyMatch.ts)), the matcher uses **one** `POST /api/match-companies` with **`streamProgress: true`**, so **step 1** (canonical company parents) runs **once** per run and the UI receives **NDJSON** step progress. The activity log also receives **one timestamped line per OpenAI completion** (step name, wall time, tokens in/out, approximate USD). Above that cap, the client falls back to **sequential** chunked POSTs (`MATCH_MATCHER_CLIENT_BATCH_SIZE` per request, concurrency 1) so each body fits server limits; step 1 may repeat per chunk until the server LRU warms. The server may run several model sub-batches in parallel **within** a single request (`MATCH_LLM_CONCURRENCY` in `server/.env.example`); very large runs increase the chance of **429** or timeouts—reduce `MATCH_LLM_CONCURRENCY` or split workloads if needed.
 
 ## License
 

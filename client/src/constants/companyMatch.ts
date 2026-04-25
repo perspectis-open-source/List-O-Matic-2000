@@ -25,16 +25,16 @@ export const MATCH_LLM_TOP_K = 8
 export const MATCH_API_BATCH_SIZE = 80
 
 /**
- * Matcher uses a smaller chunk so the progress bar advances more often (more HTTP round trips).
- * Server still runs the model in sub-batches of 50 per request.
- * 30 items per batch yields more HTTP round-trips than 40 (finer progress), fewer than smaller chunks.
+ * Max unique contact import strings in one matcher run via a single POST (must match server
+ * `MATCH_MAX_ITEMS_PER_REQUEST` / canonical cap). Above this, the client falls back to chunked
+ * requests with concurrency 1.
  */
-export const MATCH_MATCHER_CLIENT_BATCH_SIZE = 30
+export const MATCH_MAX_MATCHER_ITEMS = 2500
 
 /**
- * Max parallel POST /api/match-companies calls from the matcher (30 strings each).
- * Higher throughput increases OpenAI rate-limit risk; use 1 to serialize (enables NDJSON step progress).
+ * Chunk size when the matcher must use multiple POSTs (over {@link MATCH_MAX_MATCHER_ITEMS} unique
+ * strings). Sequential requests (concurrency 1) preserve step-1 LRU warmup between chunks.
  */
-export const MATCH_MATCHER_CONCURRENT_HTTP = 5
+export const MATCH_MATCHER_CLIENT_BATCH_SIZE = 30
 
 export const MATCHED_COMPANY_HEADER = 'Matched Company'

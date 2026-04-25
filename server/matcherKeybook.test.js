@@ -155,7 +155,7 @@ describe('matcherKeybook', () => {
     await fs.writeFile(contactF, '{"raw":"r","parentCompany":"c"}\n', 'utf8')
     await fs.writeFile(matchF, '{"raw":"r","match":"A","parentCompany":"c"}\n', 'utf8')
     const cleared = await kb.clearMatcherParentKeybooks({ companyKey: true, contactCompanyKey: false })
-    expect(cleared).toEqual({ companyKey: true, contactCompanyKey: false })
+    expect(cleared).toEqual({ companyKey: true, contactCompanyKey: false, contactCompanyMatch: false })
     await expect(fs.access(companyF)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(fs.readFile(contactF, 'utf8')).resolves.toContain('r')
     await expect(fs.readFile(matchF, 'utf8')).resolves.toContain('r')
@@ -189,10 +189,48 @@ describe('matcherKeybook', () => {
     await expect(fs.readFile(matchF, 'utf8')).resolves.toContain('r')
   })
 
-  it('clearMatcherParentKeybooks throws when neither flag is true', async () => {
+  it('clearMatcherParentKeybooks clears match only; company and contact remain', async () => {
     const kb = await import('./matcherKeybook.js')
-    await expect(kb.clearMatcherParentKeybooks({ companyKey: false, contactCompanyKey: false })).rejects.toThrow(
-      /At least one/,
-    )
+    const companyF = path.join(tmpDir, kb.COMPANY_KEY_JSONL)
+    const contactF = path.join(tmpDir, kb.CONTACT_KEY_JSONL)
+    const matchF = path.join(tmpDir, kb.CONTACT_MATCH_JSONL)
+    await fs.writeFile(companyF, '{"name":"A","parentCompany":"P"}\n', 'utf8')
+    await fs.writeFile(contactF, '{"raw":"r","parentCompany":"c"}\n', 'utf8')
+    await fs.writeFile(matchF, '{"raw":"r","match":"A","parentCompany":"c"}\n', 'utf8')
+    const cleared = await kb.clearMatcherParentKeybooks({
+      companyKey: false,
+      contactCompanyKey: false,
+      contactCompanyMatch: true,
+    })
+    expect(cleared).toEqual({ companyKey: false, contactCompanyKey: false, contactCompanyMatch: true })
+    await expect(fs.readFile(companyF, 'utf8')).resolves.toContain('A')
+    await expect(fs.readFile(contactF, 'utf8')).resolves.toContain('r')
+    await expect(fs.access(matchF)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('clearMatcherParentKeybooks clears all three jsonl files', async () => {
+    const kb = await import('./matcherKeybook.js')
+    const companyF = path.join(tmpDir, kb.COMPANY_KEY_JSONL)
+    const contactF = path.join(tmpDir, kb.CONTACT_KEY_JSONL)
+    const matchF = path.join(tmpDir, kb.CONTACT_MATCH_JSONL)
+    await fs.writeFile(companyF, '{"name":"A","parentCompany":"P"}\n', 'utf8')
+    await fs.writeFile(contactF, '{"raw":"r","parentCompany":"c"}\n', 'utf8')
+    await fs.writeFile(matchF, '{"raw":"r","match":"A","parentCompany":"c"}\n', 'utf8')
+    const cleared = await kb.clearMatcherParentKeybooks({
+      companyKey: true,
+      contactCompanyKey: true,
+      contactCompanyMatch: true,
+    })
+    expect(cleared).toEqual({ companyKey: true, contactCompanyKey: true, contactCompanyMatch: true })
+    await expect(fs.access(companyF)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(fs.access(contactF)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(fs.access(matchF)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('clearMatcherParentKeybooks throws when no flag is true', async () => {
+    const kb = await import('./matcherKeybook.js')
+    await expect(
+      kb.clearMatcherParentKeybooks({ companyKey: false, contactCompanyKey: false, contactCompanyMatch: false }),
+    ).rejects.toThrow(/At least one/)
   })
 })

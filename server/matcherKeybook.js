@@ -288,18 +288,19 @@ export async function persistNewContactParents(newEntries) {
 }
 
 /**
- * Delete persisted parent keybook JSONL files (never touches contact-company-match.jsonl).
- * @param {{ companyKey?: boolean; contactCompanyKey?: boolean }} selection
- * @returns {Promise<{ companyKey: boolean; contactCompanyKey: boolean }>} which targets had unlink attempted
+ * Delete persisted matcher JSONL keybooks (selected files only).
+ * @param {{ companyKey?: boolean; contactCompanyKey?: boolean; contactCompanyMatch?: boolean }} selection
+ * @returns {Promise<{ companyKey: boolean; contactCompanyKey: boolean; contactCompanyMatch: boolean }>} which targets had unlink attempted
  */
 export async function clearMatcherParentKeybooks(selection) {
   const sel = selection && typeof selection === 'object' ? selection : {}
   const company = sel.companyKey === true
   const contact = sel.contactCompanyKey === true
-  if (!company && !contact) {
-    throw new Error('At least one of companyKey or contactCompanyKey must be true')
+  const match = sel.contactCompanyMatch === true
+  if (!company && !contact && !match) {
+    throw new Error('At least one of companyKey, contactCompanyKey, or contactCompanyMatch must be true')
   }
-  const cleared = { companyKey: false, contactCompanyKey: false }
+  const cleared = { companyKey: false, contactCompanyKey: false, contactCompanyMatch: false }
   if (company) {
     cleared.companyKey = true
     await fs.unlink(companyKeyPath()).catch((e) => {
@@ -309,6 +310,12 @@ export async function clearMatcherParentKeybooks(selection) {
   if (contact) {
     cleared.contactCompanyKey = true
     await fs.unlink(contactKeyPath()).catch((e) => {
+      if (e.code !== 'ENOENT') throw e
+    })
+  }
+  if (match) {
+    cleared.contactCompanyMatch = true
+    await fs.unlink(contactMatchPath()).catch((e) => {
       if (e.code !== 'ENOENT') throw e
     })
   }

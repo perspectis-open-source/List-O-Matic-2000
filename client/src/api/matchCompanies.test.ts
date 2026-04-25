@@ -57,6 +57,16 @@ describe('postMatchCompaniesBatched', () => {
     const lines = [
       JSON.stringify({ type: 'progress', phase: 'step1', completed: 1, total: 2 }),
       JSON.stringify({
+        type: 'progress',
+        phase: 'llm_call',
+        stepName: 'matcher.inferParents.canonicalList',
+        model: 'gpt-4o-mini',
+        durationMs: 842,
+        callOrdinal: 1,
+        correlationId: '25ae963a-732b-43a7-a85e-bda40b863b9b',
+        usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12 },
+      }),
+      JSON.stringify({
         type: 'complete',
         results: [{ raw: 'r0', match: null }],
         meta: {
@@ -82,10 +92,20 @@ describe('postMatchCompaniesBatched', () => {
       })
     )
     const phases: string[] = []
+    const llmCalls: Array<{ durationMs?: number; correlationId?: string; usage?: { totalTokens: number } }> = []
     const out = await postMatchCompanies(['Acme'], [{ raw: 'r0', topCandidates: [] }], {
-      onStreamProgress: (ev) => phases.push(ev.phase),
+      onStreamProgress: (ev) => {
+        phases.push(ev.phase)
+        if (ev.phase === 'llm_call')
+          llmCalls.push({ durationMs: ev.durationMs, correlationId: ev.correlationId, usage: ev.usage })
+      },
     })
-    expect(phases).toEqual(['step1'])
+    expect(phases).toEqual(['step1', 'llm_call'])
+    expect(llmCalls[0]).toMatchObject({
+      durationMs: 842,
+      correlationId: '25ae963a-732b-43a7-a85e-bda40b863b9b',
+      usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12 },
+    })
     expect(out.results).toEqual([{ raw: 'r0', match: null }])
     expect(out.meta?.llmSubBatches).toBe(3)
     expect(out.parentByCanon).toEqual({ Acme: 'Acme Parent' })
@@ -160,6 +180,40 @@ describe('postMatchCompaniesBatched', () => {
     expect(progress.length).toBe(3)
     expect([...progress].sort((a, b) => a - b)).toEqual([1, 2, 3])
     expect(out.results.map((r) => r.raw)).toEqual(items.map((it) => it.raw))
+  })
+
+  it('passes serverLlmSubBatchesByPhase when meta includes all step counts', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          results: [{ raw: 'r0', match: null }],
+          meta: {
+            model: 'gpt-4o-mini',
+            llmSubBatches: 12,
+            llmSubBatchesStep1: 10,
+            llmSubBatchesStep2: 1,
+            llmSubBatchesFallback: 1,
+            usage: { promptTokens: 1, completionTokens: 0, totalTokens: 1 },
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    const phases: Array<{ s1: number; s2: number; fb: number } | undefined> = []
+    await postMatchCompaniesBatched(['A'], [{ raw: 'r0', topCandidates: [] }], {
+      onHttpRequestComplete: ({ serverLlmSubBatchesByPhase }) => {
+        phases.push(
+          serverLlmSubBatchesByPhase
+            ? {
+                s1: serverLlmSubBatchesByPhase.llmSubBatchesStep1,
+                s2: serverLlmSubBatchesByPhase.llmSubBatchesStep2,
+                fb: serverLlmSubBatchesByPhase.llmSubBatchesFallback,
+              }
+            : undefined,
+        )
+      },
+    })
+    expect(phases).toEqual([{ s1: 10, s2: 1, fb: 1 }])
   })
 
   it('merges parentByCanon and parentByRaw across HTTP chunks', async () => {

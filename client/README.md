@@ -46,3 +46,7 @@ curl -sL -o scripts/data/russell-2000-components.csv \
 npm run build-off-list-seed
 npm run generate-contacts
 ```
+
+## Matcher governance evidence
+
+Server exposes **`GET /api/matcher-evidence?correlationId=<uuid>`** (from `@syncsphere/vendor-governance/node`). NDJSON **`llm_call`** lines include the same **`correlationId`**. In the Matcher tab, expand an activity row (when a correlation is present) to load JSONL evidence, or use **Open full** for a larger dialog. Match-specific UI and stream helpers live under [`src/matcher/`](src/matcher/); vendor-neutral evidence and activity primitives are in [`vendor/shared/README.md`](../../shared/README.md).

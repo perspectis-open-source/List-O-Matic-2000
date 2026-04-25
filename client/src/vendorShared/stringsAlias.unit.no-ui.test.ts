@@ -1,11 +1,11 @@
 /**
  * @file stringsAlias.unit.no-ui.test.ts
- * @description Ensures `@vendor-shared` path alias resolves for Vitest (same as Vite).
+ * @description Ensures local standalone string helpers resolve for Vitest.
  */
 import { describe, it, expect } from 'vitest'
-import { coerceTrimmed, isNonEmptyCoercedTrimmed } from '@vendor-shared/lib/strings'
+import { coerceTrimmed, isNonEmptyCoercedTrimmed } from '../platform/local/shared/lib/strings'
 
-describe('@vendor-shared/lib/strings', () => {
+describe('local/shared/lib/strings', () => {
   it('coerceTrimmed trims and stringifies', () => {
     expect(coerceTrimmed('  x  ')).toBe('x')
     expect(coerceTrimmed(null)).toBe('')
