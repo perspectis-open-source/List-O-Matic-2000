@@ -9,6 +9,7 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const clientRoot = __dirname
 const vendorSharedPackageRoot = path.resolve(__dirname, '../../shared')
 const vendorSharedSrcRoot = path.join(vendorSharedPackageRoot, 'src')
 
@@ -36,7 +37,10 @@ export default defineConfig({
   },
   server: {
     fs: {
-      allow: [vendorSharedPackageRoot, vendorSharedSrcRoot],
+      // Setting `allow` overrides Vite's default (which auto-includes the project root), so we
+      // must list the client root explicitly. The shared package roots are needed because
+      // `@vendor-shared/*` resolves to source files outside the client tree.
+      allow: [clientRoot, vendorSharedPackageRoot, vendorSharedSrcRoot],
     },
     proxy: {
       '/api': { target: 'http://localhost:3001', changeOrigin: true },
