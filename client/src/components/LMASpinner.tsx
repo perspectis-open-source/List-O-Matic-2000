@@ -31,7 +31,7 @@ export function LMASpinner() {
           color: L_O_M_2000_CHARCOAL,
         }}
       >
-        List-O-Matic 2000
+        Mintz · List-O-Matic 2000
       </Box>
     </Box>
   )

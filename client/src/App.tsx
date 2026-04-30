@@ -17,6 +17,7 @@ import {
   Tab,
   Alert,
   Container,
+  Stack,
   CircularProgress,
   Paper,
   List,
@@ -62,6 +63,7 @@ import { AgCompaniesGrid } from './components/AgCompaniesGrid'
 import { ParentKeyGrid, type ParentKeyRow } from './components/ParentKeyGrid'
 import { MatchKeyGrid } from './components/MatchKeyGrid'
 import { CompanySelect } from './components/CompanySelect'
+import { MintzMark } from './components/MintzMark'
 import { postChat } from './api/chat'
 import {
   postMatchCompanies,
@@ -876,6 +878,29 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                 sx={{ height: 72, width: 'auto', display: 'block', objectFit: 'contain' }}
               />
             </Box>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ flexShrink: 0 }}>
+              <MintzMark size={34} />
+              <Box sx={{ minWidth: 0 }}>
+                <Typography
+                  component="a"
+                  href="https://www.mintz.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  variant="subtitle2"
+                  sx={{
+                    color: 'primary.contrastText',
+                    fontWeight: 800,
+                    letterSpacing: '0.08em',
+                    textDecoration: 'none',
+                    display: 'block',
+                    lineHeight: 1.2,
+                    '&:hover': { textDecoration: 'underline' },
+                  }}
+                >
+                  Mintz
+                </Typography>
+              </Box>
+            </Stack>
             <Typography
               variant="subtitle1"
               component="div"
