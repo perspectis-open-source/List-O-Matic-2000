@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@vendor-shared/*": ["../../shared/src/*"]
+    }
+  },
+  "include": ["index.js"]
+}

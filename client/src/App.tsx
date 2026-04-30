@@ -17,6 +17,7 @@ import {
   Tab,
   Alert,
   Container,
+  Stack,
   CircularProgress,
   Paper,
   List,
@@ -38,12 +39,14 @@ import DarkModeIcon from '@mui/icons-material/DarkMode'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import SearchIcon from '@mui/icons-material/Search'
 import DownloadIcon from '@mui/icons-material/Download'
+import { coerceTrimmed, isNonEmptyCoercedTrimmed } from '@vendor-shared/lib/strings'
 import { getAppTheme } from './theme'
 import { parseContactFile, type ContactRow } from './utils/parseFile'
 import { downloadCsv, sanitizeFilenameSegment } from './utils/exportCsv'
 import { UploadDropZone } from './components/UploadDropZone'
 import { ContactsTable } from './components/ContactsTable'
 import { CompanySelect } from './components/CompanySelect'
+import { MintzMark } from './components/MintzMark'
 import { postChat, type ReasoningStep } from './api/chat'
 
 type TabValue = 'contacts' | 'aiResults'
@@ -110,7 +113,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     const set = new Set<string>()
     for (const row of contacts) {
       const v = row[companyColumnKey]
-      if (v != null && String(v).trim() !== '') set.add(String(v).trim())
+      if (isNonEmptyCoercedTrimmed(v)) set.add(coerceTrimmed(v))
     }
     return Array.from(set)
   }, [contacts, companyColumnKey])
@@ -249,9 +252,32 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', width: '100%' }}>
       <AppBar position="static" elevation={0} sx={{ width: '100%', borderBottom: 1, borderColor: 'divider' }}>
         <Toolbar sx={{ width: '100%', maxWidth: '100%', px: { xs: 2, sm: 3 }, gap: 2, flexWrap: 'wrap' }}>
-          <Typography variant="h6" component="div" sx={{ flex: 1 }}>
-            List-O-Matic 2000
-          </Typography>
+          <Stack direction="row" alignItems="center" spacing={1.5} sx={{ flex: 1, minWidth: 0 }}>
+            <MintzMark size={34} />
+            <Box sx={{ minWidth: 0 }}>
+              <Typography
+                component="a"
+                href="https://www.mintz.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                variant="subtitle2"
+                sx={{
+                  color: 'primary.main',
+                  fontWeight: 800,
+                  letterSpacing: '0.08em',
+                  textDecoration: 'none',
+                  display: 'block',
+                  lineHeight: 1.2,
+                  '&:hover': { textDecoration: 'underline' },
+                }}
+              >
+                Mintz
+              </Typography>
+              <Typography variant="h6" component="div" sx={{ fontWeight: 600, lineHeight: 1.25 }}>
+                List-O-Matic 2000
+              </Typography>
+            </Box>
+          </Stack>
           <IconButton color="inherit" onClick={onToggleMode} aria-label="Toggle theme">
             {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
           </IconButton>
