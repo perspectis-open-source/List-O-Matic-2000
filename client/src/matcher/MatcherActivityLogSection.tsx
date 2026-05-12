@@ -7,6 +7,7 @@ import { Box, Button, IconButton, LinearProgress, Paper, Tooltip, Typography } f
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTheme } from '@mui/material/styles'
+import { IndeterminateLinearSweep } from '@syncsphere/vendor-shared/ui/indeterminate-linear-sweep'
 import type { VendorActivityLogPalette } from '../platform/local/shared/vendorActivityLog/types'
 import type { MatcherActivityLogEntry, MatcherLlmProgress } from './matcherStreamTypes'
 import { CompanyMatchActivityLogLine } from './activityLog/CompanyMatchActivityLogLine'
@@ -149,10 +150,10 @@ export function MatcherActivityLogSection({
                 />
               )}
               {httpWaiting && (
-                <LinearProgress
-                  variant="indeterminate"
-                  sx={{ mt: 0.75, borderRadius: 1, height: 4, opacity: 0.85 }}
+                <IndeterminateLinearSweep
+                  sx={{ mt: 0.75 }}
                   data-testid="matcher-llm-progress-pending"
+                  aria-label="Model request in progress"
                 />
               )}
               {serverStepsVisible &&

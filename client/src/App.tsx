@@ -25,7 +25,6 @@ import {
   ListItemText,
   Checkbox,
   TextField,
-  LinearProgress,
   Accordion,
   AccordionSummary,
   AccordionDetails,
@@ -38,6 +37,7 @@ import {
   DialogContent,
   DialogActions,
 } from '@mui/material'
+import { IndeterminateLinearSweep } from '@syncsphere/vendor-shared/ui/indeterminate-linear-sweep'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import MenuIcon from '@mui/icons-material/Menu'
@@ -1565,7 +1565,7 @@ function AppContent({ mode, onToggleMode }: { mode: 'light' | 'dark'; onToggleMo
                             LLM searching…
                           </Typography>
                         </Box>
-                        <LinearProgress variant="indeterminate" sx={{ borderRadius: 1 }} />
+                        <IndeterminateLinearSweep aria-label="LLM search in progress" />
                       </Box>
                     )}
                     {processLogLines.length === 0 ? (
