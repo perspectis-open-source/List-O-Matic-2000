@@ -22,7 +22,7 @@ async function main() {
   console.log(`Boundary verification passed. Checked ${files.length} files.`)
 }
 
-main().catch((err) => {
-  console.error('Boundary verification error:', err)
+main().catch((error) => {
+  console.error('Boundary verification error:', error)
   process.exit(1)
 })
